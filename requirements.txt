@@ -1,0 +1,11 @@
+numpy
+pandas
+openpyxl
+tqdm
+Pillow
+librosa
+PyWavelets
+scikit-learn
+joblib
+torch
+torchvision

@@ -17,7 +17,7 @@ def main():
     ap.add_argument("--num_classes", type=int, default=4)
     ap.add_argument("--img_size", type=int, default=cfg.IMG_SIZE)
     ap.add_argument("--batch_size", type=int, default=64)
-    ap.add_argument("--epochs", type=int, default=80)
+    ap.add_argument("--epochs", type=int, default=200)
     ap.add_argument("--lr", type=float, default=1e-3)
     ap.add_argument("--weight_decay", type=float, default=1e-4)
     ap.add_argument("--num_workers", type=int, default=0)

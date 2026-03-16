@@ -1,8 +1,8 @@
 import os, csv, argparse, time
+import random
 import numpy as np
 import torch
 import torch.nn as nn
-import torch.nn.functional as F   # 新增
 import torch.optim as optim
 import config as cfg
 
@@ -12,24 +12,30 @@ from NpyDataset import NpyDataset
 from sklearn.metrics import f1_score
 from HierarchicalDarknet19 import HierarchicalDarknet19
 
-# ====== HCL 固定超参（非开关）======
-W_CONSIST = 0.1      # 一致性损失系数（对称 KL）
-EPS = 1e-8           # 数值稳定
-TAU = 2.0            # 温度系数
+def set_seed(seed: int):
+    """固定所有能控制到的随机行为，便于实验复现。"""
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
 
-# ---------- metrics ----------
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
+# ---------- train and eval ----------
 @torch.no_grad()
 def metrics_from_logits(logits: torch.Tensor, y: torch.Tensor, num_classes: int) -> Dict[str, float]:
     pred = logits.argmax(dim=1)
     acc = float((pred == y).float().mean().item())
+
     y_np = y.cpu().numpy()
     p_np = pred.cpu().numpy()
     avg = "binary" if num_classes == 2 else "macro"
     f1 = float(f1_score(y_np, p_np, average=avg, zero_division=0))
+
     return {"acc": acc, "f1": f1}
 
-# ---------- train & eval with HCL ----------
-def train_one_epoch(model, loader, criterion_b, criterion_c, optimizer, device, parent_map, lambda_child, M):
+def train_one_epoch(model, loader, criterion_b, criterion_c, optimizer, device, parent_map, lambda_child, epoch):
     model.train()
     loss_sum, n = 0.0, 0
     for x, y in loader:
@@ -38,66 +44,39 @@ def train_one_epoch(model, loader, criterion_b, criterion_c, optimizer, device, 
         y_parent = parent_map[y]
 
         optimizer.zero_grad(set_to_none=True)
-        logits_b, logits_c = model(x)  # 父头(2类)、子头(4类)
+        logits_b, logits_c = model(x)
 
-        # 监督项
-        loss_sup = criterion_b(logits_b, y_parent) + lambda_child * criterion_c(logits_c, y)
+        # 前150轮：只用子类损失；之后：父类+子类
+        if epoch <= 150:
+            loss = criterion_c(logits_c, y)
+        else:
+            loss = criterion_b(logits_b, y_parent) + lambda_child * criterion_c(logits_c, y)
 
-        # 一致性项（对称 KL）
-        pb_log = F.log_softmax(logits_b, dim=1)    # [B,2]
-        pb     = pb_log.exp()                      # [B,2]
-        pc     = F.softmax(logits_c, dim=1)        # [B,4]
-        pb_hat = torch.matmul(pc, M.t())           # [B,2] = 子类概率聚合到父级
-
-        kl_b2c = F.kl_div(pb_log, pb_hat, reduction="batchmean")              # KL(p_b || pb_hat)
-        kl_c2b = F.kl_div(torch.log(pb_hat + EPS), pb, reduction="batchmean") # KL(pb_hat || p_b)
-        loss_cons = kl_b2c + kl_c2b
-
-        loss = loss_sup + W_CONSIST * loss_cons
         loss.backward()
         optimizer.step()
-
         loss_sum += float(loss.item()) * x.size(0)
         n += x.size(0)
     return loss_sum / max(n, 1)
 
-@torch.no_grad()
-def evaluate(model, loader, criterion_b, criterion_c, device, num_classes, parent_map, lambda_child, M):
+def evaluate(model, loader, criterion_b, criterion_c, device, num_classes, parent_map, lambda_child):
     model.eval()
     loss_sum, n = 0.0, 0
-    all_logits_c, all_logits_b, all_y = [], [], []
-    for x, y in loader:
-        x = x.to(device, non_blocking=True)
-        y = y.to(device, dtype=torch.long)
-        y_parent = parent_map[y]
+    all_logits_c, all_y = [], []
+    with torch.no_grad():
+        for x, y in loader:
+            x = x.to(device, non_blocking=True)
+            y = y.to(device, dtype=torch.long)
+            y_parent = parent_map[y]
 
-        logits_b, logits_c = model(x)
-
-        # 监督项
-        loss_sup = criterion_b(logits_b, y_parent) + lambda_child * criterion_c(logits_c, y)
-
-        # 一致性项（对称 KL）
-        pc     = F.softmax(logits_c, dim=1)
-        pb_hat = torch.matmul(pc, M.t())
-        loss_cons = F.nll_loss(torch.log(pb_hat + 1e-8), y_parent, reduction="mean")
-        loss = loss_sup - W_CONSIST * loss_cons
-        loss_sum += float(loss.item()) * x.size(0); n += x.size(0)
-
-        all_logits_b.append(logits_b)
-        all_logits_c.append(logits_c)
-        all_y.append(y)
-
-    logits_b = torch.cat(all_logits_b, dim=0)  # [N,2]
-    logits_c = torch.cat(all_logits_c, dim=0)  # [N,4]
-    ys       = torch.cat(all_y,        dim=0)  # [N]
-
-    # —— 一致性解码：父先验掩蔽子类，再计算子头指标 ——
-    parent_pred = logits_b.argmax(dim=1)                              # [N]
-    allow = (parent_map.view(1, -1) == parent_pred.view(-1, 1))       # [N,4] bool
-    mask  = torch.where(allow, torch.zeros_like(logits_c), torch.full_like(logits_c, -1e9))
-    logits_c_masked = logits_c + mask
-
-    mets = metrics_from_logits(logits_c_masked, ys, num_classes)
+            logits_b, logits_c = model(x)
+            loss = criterion_b(logits_b, y_parent) + lambda_child * criterion_c(logits_c, y)
+            loss_sum += float(loss.item()) * x.size(0)
+            n += x.size(0)
+            all_logits_c.append(logits_c)
+            all_y.append(y)
+    logits_c = torch.cat(all_logits_c, dim=0)
+    ys = torch.cat(all_y, dim=0)
+    mets = metrics_from_logits(logits_c, ys, num_classes)
     return loss_sum / max(n, 1), mets
 
 def main():
@@ -107,7 +86,7 @@ def main():
     ap.add_argument("--num_classes", type=int, default=4)
     ap.add_argument("--img_size", type=int, default=cfg.IMG_SIZE)
     ap.add_argument("--batch_size", type=int, default=64)
-    ap.add_argument("--epochs", type=int, default=160)
+    ap.add_argument("--epochs", type=int, default=200)
     ap.add_argument("--lr", type=float, default=1e-3)
     ap.add_argument("--weight_decay", type=float, default=1e-4)
     ap.add_argument("--num_workers", type=int, default=0)
@@ -116,6 +95,8 @@ def main():
     ap.add_argument("--early_stop", type=int, default=0)
     ap.add_argument("--lambda_child", type=float, default=0.3)
     args = ap.parse_args()
+
+    set_seed(cfg.SEED)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     os.makedirs(args.save_dir, exist_ok=True)
@@ -157,34 +138,28 @@ def main():
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
 
     # 父类映射：四分类标签 → 父类（0=non-leak, 1=leak）
-    parent_map = torch.tensor([1, 1, 0, 0], dtype=torch.long, device=device)  # idx 0,1,2,3
-
-    # 构造聚合矩阵 M ∈ R^{2×4}（子→父）
-    M = torch.zeros(2, num_classes, dtype=torch.float32, device=device)
-    for k in range(num_classes):
-        M[parent_map[k], k] = 1.0
-    M.requires_grad_(False)
+    PARENT_MAP = torch.tensor([1, 1, 0, 0], dtype=torch.long).to(device)  # idx 0,1,2,3
 
     # 日志
     stamp = time.strftime("%Y%m%d-%H%M%S")
-    log_path = os.path.join(args.log_dir, f"metrics_darknet19_hcl_{stamp}.csv")
+    log_path = os.path.join(args.log_dir, f"metrics_darknet19_hier_{stamp}.csv")
     with open(log_path, "w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=["epoch","train_loss","val_loss","val_acc","val_f1","test_acc","test_f1"])
         w.writeheader()
 
     best_val_f1 = -1.0
-    best_ckpt = os.path.join(args.save_dir, f"darknet19_hcl_best_{stamp}.pth")
+    best_ckpt = os.path.join(args.save_dir, f"darknet19_hier_best_{stamp}.pth")
     patience, noimp = args.early_stop, 0
 
     # 训练
     for ep in range(1, args.epochs + 1):
         tr_loss = train_one_epoch(
             model, tr_loader, criterion_b, criterion_c, optimizer, device,
-            parent_map, args.lambda_child, M
+            PARENT_MAP, args.lambda_child, ep
         )
         va_loss, va_m = evaluate(
             model, va_loader, criterion_b, criterion_c, device,
-            num_classes, parent_map, args.lambda_child, M
+            num_classes, PARENT_MAP, args.lambda_child
         )
         scheduler.step()
 
@@ -204,8 +179,7 @@ def main():
             torch.save({
                 "state_dict": model.state_dict(),
                 "num_classes": num_classes,
-                "lambda_child": args.lambda_child,
-                "w_consist": W_CONSIST
+                "lambda_child": args.lambda_child
             }, best_ckpt)
             print(f"** Saved best (val_f1={best_val_f1:.4f}) → {best_ckpt}")
             noimp = 0
@@ -223,7 +197,7 @@ def main():
 
     te_loss, te_m = evaluate(
         model, te_loader, criterion_b, criterion_c, device,
-        num_classes, parent_map, args.lambda_child, M
+        num_classes, PARENT_MAP, args.lambda_child
     )
     print(f"[TEST] loss={te_loss:.4f} | acc={te_m['acc']:.4f} | f1={te_m['f1']:.4f}")
 

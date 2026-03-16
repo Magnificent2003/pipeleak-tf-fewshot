@@ -1,7 +1,0 @@
-tau,fuse_acc,fuse_f1,fuse_prec,fuse_rec,fuse_bal_acc
-0.2785,0.905109,0.906475,0.863014,0.954545,0.906850
-
-darknet2_tau,darknet2_acc,darknet2_f1
-0.5000,0.883212,0.880597
-hier4_tau,hier4_acc,hier4_f1
-0.5000,0.905109,0.905109

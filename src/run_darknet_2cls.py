@@ -5,7 +5,7 @@ import torch.nn as nn
 import torch.optim as optim
 import config as cfg
 
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Subset
 from NpyDataset import NpyDataset
 from Darknet19 import Darknet19
 from train_and_eval import train_one_epoch, evaluate
@@ -19,6 +19,7 @@ def main():
     ap.add_argument("--lr", type=float, default=1e-3)
     ap.add_argument("--weight_decay", type=float, default=1e-4)
     ap.add_argument("--num_workers", type=int, default=0)
+    ap.add_argument("--fraction", type=float, default=cfg.TRAIN_FRACTION)
     ap.add_argument("--save_dir", type=str, default=cfg.CKPT_DIR)
     ap.add_argument("--log_dir", type=str, default=cfg.LOG_DIR)
     ap.add_argument("--early_stop", type=int, default=0)  # 0=关闭早停
@@ -41,7 +42,24 @@ def main():
     ds_va = NpyDataset(Xva, yva, normalize="imagenet", memmap=True)
     ds_te = NpyDataset(Xte, yte, normalize="imagenet", memmap=True)
 
+    # 先在完整训练集上统计类别数
     num_classes = int(np.max(ds_tr.y)) + 1
+    
+    # ===== 训练集采样比例（TRAIN_FRACTION） =====
+    train_fraction = args.fraction
+    train_fraction = max(0.0, min(1.0, train_fraction))
+
+    n_total = len(ds_tr)
+    n_keep = max(1, int(round(n_total * train_fraction)))
+
+    seed = int(getattr(cfg, "RANDOM_SEED", 42))
+    rng = np.random.RandomState(seed)
+    indices = rng.permutation(n_total)[:n_keep]
+
+    ds_tr = Subset(ds_tr, indices)
+    print(f"[Train subset] Use {n_keep}/{n_total} samples "
+        f"({train_fraction:.2f} of training data).")
+
     print(f"Train/Val/Test sizes: {len(ds_tr)}/{len(ds_va)}/{len(ds_te)} | classes={num_classes}")
 
     tr_loader = DataLoader(ds_tr, batch_size=args.batch_size, shuffle=True,

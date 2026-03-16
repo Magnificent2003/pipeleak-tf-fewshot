@@ -1,4 +1,5 @@
 import os, csv, argparse, time
+import random
 import numpy as np
 import torch
 import torch.nn as nn
@@ -6,10 +7,20 @@ import torch.optim as optim
 import config as cfg
 
 from typing import Dict
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Subset
 from NpyDataset import NpyDataset
 from sklearn.metrics import f1_score
 from HierarchicalDarknet19 import HierarchicalDarknet19
+
+def set_seed(seed: int):
+    """固定所有能控制到的随机行为，便于实验复现。"""
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
 
 # ---------- train and eval ----------
 @torch.no_grad()
@@ -69,15 +80,18 @@ def main():
     ap.add_argument("--num_classes", type=int, default=4)
     ap.add_argument("--img_size", type=int, default=cfg.IMG_SIZE)
     ap.add_argument("--batch_size", type=int, default=64)
-    ap.add_argument("--epochs", type=int, default=80)
+    ap.add_argument("--epochs", type=int, default=200)
     ap.add_argument("--lr", type=float, default=1e-3)
     ap.add_argument("--weight_decay", type=float, default=1e-4)
     ap.add_argument("--num_workers", type=int, default=0)
+    ap.add_argument("--fraction", type=float, default=cfg.TRAIN_FRACTION)
     ap.add_argument("--save_dir", type=str, default=cfg.CKPT_DIR)
     ap.add_argument("--log_dir", type=str, default=cfg.LOG_DIR)
     ap.add_argument("--early_stop", type=int, default=0)
     ap.add_argument("--lambda_child", type=float, default=0.3)
     args = ap.parse_args()
+
+    set_seed(42)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     os.makedirs(args.save_dir, exist_ok=True)
@@ -96,11 +110,23 @@ def main():
     ds_va = NpyDataset(Xva, yva, normalize="imagenet", memmap=True)
     ds_te = NpyDataset(Xte, yte, normalize="imagenet", memmap=True)
 
-    num_classes = int(args.num_classes)
-    for split_name, ds in [("train", ds_tr), ("val", ds_va), ("test", ds_te)]:
-        y_min, y_max = int(np.min(ds.y)), int(np.max(ds.y))
-        if y_min < 0 or y_max >= num_classes:
-            print(f"[WARN] {split_name} 标签范围 {y_min}..{y_max} 超出 [0,{num_classes-1}]")
+    # 先在完整训练集上统计类别数
+    num_classes = int(np.max(ds_tr.y)) + 1
+    
+    # ===== 训练集采样比例（TRAIN_FRACTION） =====
+    train_fraction = args.fraction
+    train_fraction = max(0.0, min(1.0, train_fraction))
+
+    n_total = len(ds_tr)
+    n_keep = max(1, int(round(n_total * train_fraction)))
+
+    seed = int(getattr(cfg, "RANDOM_SEED", 42))
+    rng = np.random.RandomState(seed)
+    indices = rng.permutation(n_total)[:n_keep]
+
+    ds_tr = Subset(ds_tr, indices)
+    print(f"[Train subset] Use {n_keep}/{n_total} samples "
+        f"({train_fraction:.2f} of training data).")
 
     print(f"Train/Val/Test sizes: {len(ds_tr)}/{len(ds_va)}/{len(ds_te)} | classes={num_classes}")
 

@@ -44,7 +44,7 @@ def main():
     ap.add_argument("--data_root", type=str, default=cfg.DATASET_STFT)
     ap.add_argument("--img_size", type=int, default=cfg.IMG_SIZE)
     ap.add_argument("--batch_size", type=int, default=64)
-    ap.add_argument("--checkpoint", type=str, default="./checkpoints/darknet19_4cls_best.pth")
+    ap.add_argument("--checkpoint", type=str, default="./checkpoints/darknet19_hier_best_20251208-092625.pth")
     ap.add_argument("--num_workers", type=int, default=4)
     ap.add_argument("--label_prefix", type=str, default="y4")
     ap.add_argument("--num_classes", type=int, default=4)

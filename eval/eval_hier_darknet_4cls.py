@@ -46,7 +46,7 @@ def main():
     ap.add_argument("--img_size", type=int, default=cfg.IMG_SIZE)
     ap.add_argument("--batch_size", type=int, default=64)
     ap.add_argument("--num_classes", type=int, default=4)
-    ap.add_argument("--ckpt", type=str, default="./checkpoints/darknet19_hier_best.pth")
+    ap.add_argument("--ckpt", type=str, default="./checkpoints/darknet19_hier_best_20251208-092625.pth")
     args = ap.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

@@ -5,3 +5,8 @@ data/
 *.pth
 *.pt
 *.joblib
+*.venv
+*.log
+*.csv
+*.png
+*.svg
