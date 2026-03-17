@@ -119,6 +119,23 @@ def evaluate(model, loader, criterion, device, num_classes=4):
         f1 = 0.0
     return run_loss / max(len(loader.dataset), 1), {"acc": acc, "f1": f1}
 
+
+def parent_metrics_from_cm4(cm4: np.ndarray):
+    # Parent mapping: {0,1}->0 and {2,3}->1
+    cm_parent = np.array(
+        [
+            [cm4[0:2, 0:2].sum(), cm4[0:2, 2:4].sum()],
+            [cm4[2:4, 0:2].sum(), cm4[2:4, 2:4].sum()],
+        ],
+        dtype=np.int64,
+    )
+    tp = int(cm_parent[1, 1])
+    fp = int(cm_parent[0, 1])
+    fn = int(cm_parent[1, 0])
+    parent_rec = tp / max(tp + fn, 1)
+    parent_f1 = (2.0 * tp) / max(2 * tp + fp + fn, 1)
+    return cm_parent, float(parent_f1), float(parent_rec)
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--data_root", type=str, default=cfg.DATASET)
@@ -172,7 +189,13 @@ def main():
     stamp = time.strftime("%Y%m%d-%H%M%S")
     log_path = os.path.join(args.log_dir, f"metrics_resnet1d_4cls_{stamp}.csv")
     with open(log_path, "w", newline="", encoding="utf-8") as f:
-        w = csv.DictWriter(f, fieldnames=["epoch","train_loss","val_loss","val_acc","val_f1","test_acc","test_f1"])
+        w = csv.DictWriter(
+            f,
+            fieldnames=[
+                "epoch","train_loss","val_loss","val_acc","val_f1",
+                "test_acc","test_f1","test_parent_f1","test_parent_recall",
+            ],
+        )
         w.writeheader()
 
     best_val_f1, best_ckpt = -1.0, os.path.join(args.save_dir, f"resnet1d_4cls_best_{stamp}.pth")
@@ -187,9 +210,16 @@ def main():
               f"| val_acc={va_m['acc']:.4f} | val_f1={va_m['f1']:.4f}")
 
         with open(log_path, "a", newline="", encoding="utf-8") as f:
-            w = csv.DictWriter(f, fieldnames=["epoch","train_loss","val_loss","val_acc","val_f1","test_acc","test_f1"])
+            w = csv.DictWriter(
+                f,
+                fieldnames=[
+                    "epoch","train_loss","val_loss","val_acc","val_f1",
+                    "test_acc","test_f1","test_parent_f1","test_parent_recall",
+                ],
+            )
             w.writerow({"epoch":ep, "train_loss":tr_loss, "val_loss":va_loss,
-                        "val_acc":va_m["acc"], "val_f1":va_m["f1"], "test_acc":"", "test_f1":""})
+                        "val_acc":va_m["acc"], "val_f1":va_m["f1"],
+                        "test_acc":"", "test_f1":"", "test_parent_f1":"", "test_parent_recall":""})
 
         if va_m["f1"] > best_val_f1:
             best_val_f1 = va_m["f1"]
@@ -229,11 +259,22 @@ def main():
         cm[t, p] += 1
     print("\n[TEST] Confusion Matrix (rows=true, cols=pred):")
     print(cm)
+    cm_parent, parent_f1_te, parent_rec_te = parent_metrics_from_cm4(cm)
+    print("\n[TEST] Parent Confusion Matrix (rows=true, cols=pred, 01->0,23->1):")
+    print(cm_parent)
+    print(f"[TEST] 4-class Parent-F1={parent_f1_te:.4f} Parent-Recall={parent_rec_te:.4f}")
 
     with open(log_path, "a", newline="", encoding="utf-8") as f:
-        w = csv.DictWriter(f, fieldnames=["epoch","train_loss","val_loss","val_acc","val_f1","test_acc","test_f1"])
+        w = csv.DictWriter(
+            f,
+            fieldnames=[
+                "epoch","train_loss","val_loss","val_acc","val_f1",
+                "test_acc","test_f1","test_parent_f1","test_parent_recall",
+            ],
+        )
         w.writerow({"epoch":"best", "train_loss":"", "val_loss":"", "val_acc":"", "val_f1":best_val_f1,
-                    "test_acc":te_m["acc"], "test_f1":te_m["f1"]})
+                    "test_acc":te_m["acc"], "test_f1":te_m["f1"],
+                    "test_parent_f1":parent_f1_te, "test_parent_recall":parent_rec_te})
 
     print(f"[LOG] saved → {log_path}")
     print(f"[CKPT] best → {best_ckpt}")

@@ -34,6 +34,23 @@ def mc_metrics_from_logits(logits: np.ndarray, y: np.ndarray):
     prec, rec, f1, _ = precision_recall_fscore_support(y, yhat, average="macro", zero_division=0)
     return {"acc": float(acc), "precision": float(prec), "recall": float(rec), "f1": float(f1), "yhat": yhat}
 
+
+def parent_metrics_from_cm4(cm4: np.ndarray):
+    # Parent mapping: {0,1}->0 and {2,3}->1
+    cm_parent = np.array(
+        [
+            [cm4[0:2, 0:2].sum(), cm4[0:2, 2:4].sum()],
+            [cm4[2:4, 0:2].sum(), cm4[2:4, 2:4].sum()],
+        ],
+        dtype=np.int64,
+    )
+    tp = int(cm_parent[1, 1])
+    fp = int(cm_parent[0, 1])
+    fn = int(cm_parent[1, 0])
+    parent_rec = tp / max(tp + fn, 1)
+    parent_f1 = (2.0 * tp) / max(2 * tp + fp + fn, 1)
+    return cm_parent, float(parent_f1), float(parent_rec)
+
 @torch.no_grad()
 def eval_logits(model, loader, device):
     model.eval()
@@ -103,7 +120,7 @@ def main():
     with open(log_path, "w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=[
             "epoch","train_loss","val_acc","val_macro_f1","val_precision_macro","val_recall_macro",
-            "test_acc","test_macro_f1"
+            "test_acc","test_macro_f1","test_parent_f1","test_parent_recall"
         ])
         w.writeheader()
 
@@ -131,13 +148,13 @@ def main():
         with open(log_path, "a", newline="", encoding="utf-8") as f:
             w = csv.DictWriter(f, fieldnames=[
                 "epoch","train_loss","val_acc","val_macro_f1","val_precision_macro","val_recall_macro",
-                "test_acc","test_macro_f1"
+                "test_acc","test_macro_f1","test_parent_f1","test_parent_recall"
             ])
             w.writerow({
                 "epoch": ep, "train_loss": float(tr_loss),
                 "val_acc": m_va["acc"], "val_macro_f1": m_va["f1"],
                 "val_precision_macro": m_va["precision"], "val_recall_macro": m_va["recall"],
-                "test_acc": "", "test_macro_f1": ""
+                "test_acc": "", "test_macro_f1": "", "test_parent_f1": "", "test_parent_recall": ""
             })
 
         if m_va["f1"] > best_f1:
@@ -158,6 +175,9 @@ def main():
     # 混淆矩阵打印（可注释）
     cm = confusion_matrix(y_te, m_te["yhat"], labels=list(range(num_classes)))
     print(f"\n[TEST] Confusion Matrix (rows=true, cols=pred):\n{cm}")
+    cm_parent, parent_f1_te, parent_rec_te = parent_metrics_from_cm4(cm)
+    print(f"\n[TEST] Parent Confusion Matrix (rows=true, cols=pred, 01->0,23->1):\n{cm_parent}")
+    print(f"[TEST] 4-class Parent-F1={parent_f1_te:.4f} Parent-Recall={parent_rec_te:.4f}")
 
     # save ckpt + final row
     ckpt_path = os.path.join(args.save_dir, f"mlp4_cwt_best_{stamp}.pt")
@@ -165,12 +185,13 @@ def main():
     with open(log_path, "a", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=[
             "epoch","train_loss","val_acc","val_macro_f1","val_precision_macro","val_recall_macro",
-            "test_acc","test_macro_f1"
+            "test_acc","test_macro_f1","test_parent_f1","test_parent_recall"
         ])
         w.writerow({
             "epoch": "best", "train_loss": "", "val_acc": "", "val_macro_f1": best_f1,
             "val_precision_macro": "", "val_recall_macro": "",
-            "test_acc": m_te["acc"], "test_macro_f1": m_te["f1"]
+            "test_acc": m_te["acc"], "test_macro_f1": m_te["f1"],
+            "test_parent_f1": parent_f1_te, "test_parent_recall": parent_rec_te,
         })
     print(f"[CKPT] {ckpt_path}\n[LOG]  {log_path}")
 

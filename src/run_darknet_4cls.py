@@ -10,6 +10,47 @@ from NpyDataset import NpyDataset
 from Darknet19 import Darknet19
 from train_and_eval import train_one_epoch, evaluate
 
+
+@torch.no_grad()
+def collect_predictions(model, loader, device):
+    model.eval()
+    y_true, y_pred = [], []
+    for x, y in loader:
+        x = x.to(device, non_blocking=True)
+        logits = model(x)
+        pred = logits.argmax(dim=1).detach().cpu().numpy()
+        y_pred.append(pred)
+        y_true.append(y.numpy())
+    y_true = np.concatenate(y_true) if y_true else np.array([], dtype=np.int64)
+    y_pred = np.concatenate(y_pred) if y_pred else np.array([], dtype=np.int64)
+    return y_true, y_pred
+
+
+def confusion_matrix_np(y_true: np.ndarray, y_pred: np.ndarray, num_classes: int):
+    cm = np.zeros((num_classes, num_classes), dtype=np.int64)
+    for t, p in zip(y_true, y_pred):
+        if 0 <= int(t) < num_classes and 0 <= int(p) < num_classes:
+            cm[int(t), int(p)] += 1
+    return cm
+
+
+def parent_metrics_from_cm4(cm4: np.ndarray):
+    # Parent mapping: {0,1}->0 and {2,3}->1
+    cm_parent = np.array(
+        [
+            [cm4[0:2, 0:2].sum(), cm4[0:2, 2:4].sum()],
+            [cm4[2:4, 0:2].sum(), cm4[2:4, 2:4].sum()],
+        ],
+        dtype=np.int64,
+    )
+    tp = int(cm_parent[1, 1])
+    fp = int(cm_parent[0, 1])
+    fn = int(cm_parent[1, 0])
+    parent_rec = tp / max(tp + fn, 1)
+    parent_f1 = (2.0 * tp) / max(2 * tp + fp + fn, 1)
+    return cm_parent, float(parent_f1), float(parent_rec)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--data_root", type=str, default=cfg.DATASET_STFT)
@@ -64,7 +105,13 @@ def main():
     stamp = time.strftime("%Y%m%d-%H%M%S")
     log_path = os.path.join(args.log_dir, f"metrics_darknet19_4cls_{stamp}.csv")
     with open(log_path, "w", newline="", encoding="utf-8") as f:
-        w = csv.DictWriter(f, fieldnames=["epoch","train_loss","val_loss","val_acc","val_f1","test_acc","test_f1"])
+        w = csv.DictWriter(
+            f,
+            fieldnames=[
+                "epoch","train_loss","val_loss","val_acc","val_f1",
+                "test_acc","test_f1","test_parent_f1","test_parent_recall",
+            ],
+        )
         w.writeheader()
 
     best_val_f1 = -1.0
@@ -80,9 +127,16 @@ def main():
               f"| val_acc={va_m['acc']:.4f} | val_f1={va_m['f1']:.4f}")
 
         with open(log_path, "a", newline="", encoding="utf-8") as f:
-            w = csv.DictWriter(f, fieldnames=["epoch","train_loss","val_loss","val_acc","val_f1","test_acc","test_f1"])
+            w = csv.DictWriter(
+                f,
+                fieldnames=[
+                    "epoch","train_loss","val_loss","val_acc","val_f1",
+                    "test_acc","test_f1","test_parent_f1","test_parent_recall",
+                ],
+            )
             w.writerow({"epoch":ep, "train_loss":tr_loss, "val_loss":va_loss,
-                        "val_acc":va_m["acc"], "val_f1":va_m["f1"], "test_acc":"", "test_f1":""})
+                        "val_acc":va_m["acc"], "val_f1":va_m["f1"],
+                        "test_acc":"", "test_f1":"", "test_parent_f1":"", "test_parent_recall":""})
 
         if va_m["f1"] > best_val_f1:
             best_val_f1 = va_m["f1"]
@@ -104,11 +158,26 @@ def main():
 
     te_loss, te_m = evaluate(model, te_loader, criterion, device, num_classes)
     print(f"[TEST] loss={te_loss:.4f} | acc={te_m['acc']:.4f} | f1={te_m['f1']:.4f}")
+    y_true, y_pred = collect_predictions(model, te_loader, device)
+    cm_te = confusion_matrix_np(y_true, y_pred, num_classes)
+    print("\n[TEST] Confusion Matrix (rows=true, cols=pred):")
+    print(cm_te)
+    cm_parent_te, parent_f1_te, parent_rec_te = parent_metrics_from_cm4(cm_te)
+    print("\n[TEST] Parent Confusion Matrix (rows=true, cols=pred, 01->0,23->1):")
+    print(cm_parent_te)
+    print(f"[TEST] 4-class Parent-F1={parent_f1_te:.4f} Parent-Recall={parent_rec_te:.4f}")
 
     with open(log_path, "a", newline="", encoding="utf-8") as f:
-        w = csv.DictWriter(f, fieldnames=["epoch","train_loss","val_loss","val_acc","val_f1","test_acc","test_f1"])
+        w = csv.DictWriter(
+            f,
+            fieldnames=[
+                "epoch","train_loss","val_loss","val_acc","val_f1",
+                "test_acc","test_f1","test_parent_f1","test_parent_recall",
+            ],
+        )
         w.writerow({"epoch":"best", "train_loss":"", "val_loss":"", "val_acc":"", "val_f1":best_val_f1,
-                    "test_acc":te_m["acc"], "test_f1":te_m["f1"]})
+                    "test_acc":te_m["acc"], "test_f1":te_m["f1"],
+                    "test_parent_f1":parent_f1_te, "test_parent_recall":parent_rec_te})
 
     print(f"[LOG] saved → {log_path}")
     print(f"[CKPT] best → {best_ckpt}")
