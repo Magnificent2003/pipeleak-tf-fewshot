@@ -118,8 +118,8 @@ def evaluate(model, loader, criterion, device, num_classes=2):
         P  = tp / max(tp+fp, 1); R = tp / max(tp+fn, 1)
         f1 = 2*P*R / max(P+R, 1e-12)
     else:
-        f1 = 0.0
-    return run_loss / max(len(loader.dataset), 1), {"acc": acc, "f1": f1}
+        P, R, f1 = 0.0, 0.0, 0.0
+    return run_loss / max(len(loader.dataset), 1), {"acc": acc, "precision": P, "recall": R, "f1": f1}
 
 def main():
     ap = argparse.ArgumentParser()
@@ -173,7 +173,10 @@ def main():
     stamp = time.strftime("%Y%m%d-%H%M%S")
     log_path = os.path.join(args.log_dir, f"metrics_inception1d_2cls_{stamp}.csv")
     with open(log_path, "w", newline="", encoding="utf-8") as f:
-        w = csv.DictWriter(f, fieldnames=["epoch","train_loss","val_loss","val_acc","val_f1","test_acc","test_f1"])
+        w = csv.DictWriter(
+            f,
+            fieldnames=["epoch","train_loss","val_loss","val_acc","val_f1","test_acc","test_f1","test_recall"],
+        )
         w.writeheader()
 
     best_val_f1, best_ckpt = -1.0, os.path.join(args.save_dir, f"inception1d_2cls_best_{stamp}.pth")
@@ -188,9 +191,12 @@ def main():
               f"| val_acc={va_m['acc']:.4f} | val_f1={va_m['f1']:.4f}")
 
         with open(log_path, "a", newline="", encoding="utf-8") as f:
-            w = csv.DictWriter(f, fieldnames=["epoch","train_loss","val_loss","val_acc","val_f1","test_acc","test_f1"])
+            w = csv.DictWriter(
+                f,
+                fieldnames=["epoch","train_loss","val_loss","val_acc","val_f1","test_acc","test_f1","test_recall"],
+            )
             w.writerow({"epoch":ep, "train_loss":tr_loss, "val_loss":va_loss,
-                        "val_acc":va_m["acc"], "val_f1":va_m["f1"], "test_acc":"", "test_f1":""})
+                        "val_acc":va_m["acc"], "val_f1":va_m["f1"], "test_acc":"", "test_f1":"", "test_recall":""})
 
         if va_m["f1"] > best_val_f1:
             best_val_f1 = va_m["f1"]
@@ -211,12 +217,15 @@ def main():
         print(f"Loaded best checkpoint: {best_ckpt} (val_f1={best_val_f1:.4f})")
 
     te_loss, te_m = evaluate(model, te_loader, criterion, device, num_classes)
-    print(f"[TEST] loss={te_loss:.4f} | acc={te_m['acc']:.4f} | f1={te_m['f1']:.4f}")
+    print(f"[TEST] loss={te_loss:.4f} | acc={te_m['acc']:.4f} | f1={te_m['f1']:.4f} | recall={te_m['recall']:.4f}")
 
     with open(log_path, "a", newline="", encoding="utf-8") as f:
-        w = csv.DictWriter(f, fieldnames=["epoch","train_loss","val_loss","val_acc","val_f1","test_acc","test_f1"])
+        w = csv.DictWriter(
+            f,
+            fieldnames=["epoch","train_loss","val_loss","val_acc","val_f1","test_acc","test_f1","test_recall"],
+        )
         w.writerow({"epoch":"best", "train_loss":"", "val_loss":"", "val_acc":"", "val_f1":best_val_f1,
-                    "test_acc":te_m["acc"], "test_f1":te_m["f1"]})
+                    "test_acc":te_m["acc"], "test_f1":te_m["f1"], "test_recall":te_m["recall"]})
 
     print(f"[LOG] saved → {log_path}")
     print(f"[CKPT] best → {best_ckpt}")

@@ -42,6 +42,23 @@ def mc_metrics_from_logits(logits: np.ndarray, y: np.ndarray):
     return {"acc": float(acc), "precision": float(prec), "recall": float(rec), "f1": float(f1), "yhat": yhat}
 
 
+def parent_metrics_from_cm4(cm4: np.ndarray):
+    # Parent mapping: {0,1}->0 and {2,3}->1
+    cm_parent = np.array(
+        [
+            [cm4[0:2, 0:2].sum(), cm4[0:2, 2:4].sum()],
+            [cm4[2:4, 0:2].sum(), cm4[2:4, 2:4].sum()],
+        ],
+        dtype=np.int64,
+    )
+    tp = int(cm_parent[1, 1])
+    fp = int(cm_parent[0, 1])
+    fn = int(cm_parent[1, 0])
+    parent_rec = tp / max(tp + fn, 1)
+    parent_f1 = (2.0 * tp) / max(2 * tp + fp + fn, 1)
+    return cm_parent, float(parent_f1), float(parent_rec)
+
+
 def mfcc_stats_1d(
     sig: np.ndarray,
     sr: int,
@@ -205,7 +222,7 @@ def main():
             f,
             fieldnames=[
                 "epoch", "train_loss", "val_acc", "val_macro_f1", "val_precision_macro", "val_recall_macro",
-                "test_acc", "test_macro_f1",
+                "test_acc", "test_macro_f1", "test_recall_macro", "test_parent_f1", "test_parent_recall",
             ],
         )
         w.writeheader()
@@ -236,7 +253,7 @@ def main():
                 f,
                 fieldnames=[
                     "epoch", "train_loss", "val_acc", "val_macro_f1", "val_precision_macro", "val_recall_macro",
-                    "test_acc", "test_macro_f1",
+                    "test_acc", "test_macro_f1", "test_recall_macro", "test_parent_f1", "test_parent_recall",
                 ],
             )
             w.writerow(
@@ -249,6 +266,9 @@ def main():
                     "val_recall_macro": m_va["recall"],
                     "test_acc": "",
                     "test_macro_f1": "",
+                    "test_recall_macro": "",
+                    "test_parent_f1": "",
+                    "test_parent_recall": "",
                 }
             )
 
@@ -267,10 +287,13 @@ def main():
         model.load_state_dict(best_state, strict=True)
     logits_te, y_te = eval_logits(model, te_loader, device)
     m_te = mc_metrics_from_logits(logits_te, y_te)
-    print(f"[TEST] acc={m_te['acc']:.4f} macro-F1={m_te['f1']:.4f}")
+    print(f"[TEST] acc={m_te['acc']:.4f} macro-F1={m_te['f1']:.4f} macro-Recall={m_te['recall']:.4f}")
 
     cm = confusion_matrix(y_te, m_te["yhat"], labels=list(range(num_classes)))
     print(f"\n[TEST] Confusion Matrix (rows=true, cols=pred):\n{cm}")
+    cm_parent, parent_f1_te, parent_rec_te = parent_metrics_from_cm4(cm)
+    print(f"\n[TEST] Parent Confusion Matrix (rows=true, cols=pred, 01->0,23->1):\n{cm_parent}")
+    print(f"[TEST] 4-class Parent-F1={parent_f1_te:.4f} Parent-Recall={parent_rec_te:.4f}")
 
     ckpt_path = os.path.join(args.save_dir, f"mlp_mfcc_4cls_best_{stamp}.pt")
     torch.save(
@@ -302,7 +325,7 @@ def main():
             f,
             fieldnames=[
                 "epoch", "train_loss", "val_acc", "val_macro_f1", "val_precision_macro", "val_recall_macro",
-                "test_acc", "test_macro_f1",
+                "test_acc", "test_macro_f1", "test_recall_macro", "test_parent_f1", "test_parent_recall",
             ],
         )
         w.writerow(
@@ -315,6 +338,9 @@ def main():
                 "val_recall_macro": "",
                 "test_acc": m_te["acc"],
                 "test_macro_f1": m_te["f1"],
+                "test_recall_macro": m_te["recall"],
+                "test_parent_f1": parent_f1_te,
+                "test_parent_recall": parent_rec_te,
             }
         )
     print(f"[CKPT] {ckpt_path}\n[LOG]  {log_path}")

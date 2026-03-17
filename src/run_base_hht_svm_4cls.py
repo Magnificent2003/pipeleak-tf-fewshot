@@ -21,6 +21,23 @@ def mc_metrics_from_pred(y_pred: np.ndarray, y_true: np.ndarray):
     return {"acc": float(acc), "precision": float(prec), "recall": float(rec), "f1": float(f1)}
 
 
+def parent_metrics_from_cm4(cm4: np.ndarray):
+    # Parent mapping: {0,1}->0 and {2,3}->1
+    cm_parent = np.array(
+        [
+            [cm4[0:2, 0:2].sum(), cm4[0:2, 2:4].sum()],
+            [cm4[2:4, 0:2].sum(), cm4[2:4, 2:4].sum()],
+        ],
+        dtype=np.int64,
+    )
+    tp = int(cm_parent[1, 1])
+    fp = int(cm_parent[0, 1])
+    fn = int(cm_parent[1, 0])
+    parent_rec = tp / max(tp + fn, 1)
+    parent_f1 = (2.0 * tp) / max(2 * tp + fp + fn, 1)
+    return cm_parent, float(parent_f1), float(parent_rec)
+
+
 def _build_hht_cache_key(args):
     key = (
         f"m{args.hht_method}_sr{args.sr}_tr{args.hht_trials}_nw{args.hht_noise_width}_"
@@ -268,8 +285,11 @@ def main():
     labels = list(range(num_classes))
     cm_val = confusion_matrix(yva, best_model.predict(Fva), labels=labels)
     cm_te = confusion_matrix(yte, yhat_te, labels=labels)
+    cm_parent_te, parent_f1_te, parent_rec_te = parent_metrics_from_cm4(cm_te)
     print(f"\n[VAL]  Confusion Matrix (rows=true, cols=pred):\n{cm_val}")
     print(f"\n[TEST] Confusion Matrix (rows=true, cols=pred):\n{cm_te}")
+    print(f"\n[TEST] Parent Confusion Matrix (rows=true, cols=pred, 01->0,23->1):\n{cm_parent_te}")
+    print(f"[TEST] 4-class Parent-F1={parent_f1_te:.4f} Parent-Recall={parent_rec_te:.4f}")
 
     stamp = time.strftime("%Y%m%d-%H%M%S")
     ckpt_path = os.path.join(args.save_dir, f"svm_hht_4cls_best_{stamp}.joblib")
@@ -302,6 +322,7 @@ def main():
             fieldnames=[
                 "C", "val_acc", "val_macro_f1", "val_precision_macro", "val_recall_macro",
                 "test_acc", "test_macro_f1", "test_precision_macro", "test_recall_macro",
+                "test_parent_f1", "test_parent_recall",
             ],
         )
         w.writeheader()
@@ -316,6 +337,8 @@ def main():
                 "test_macro_f1": m_te["f1"],
                 "test_precision_macro": m_te["precision"],
                 "test_recall_macro": m_te["recall"],
+                "test_parent_f1": parent_f1_te,
+                "test_parent_recall": parent_rec_te,
             }
         )
 
