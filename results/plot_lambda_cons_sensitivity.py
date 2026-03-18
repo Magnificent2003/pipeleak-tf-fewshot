@@ -189,6 +189,12 @@ def main() -> None:
         help="Polynomial degree on λcons for fitted curves.",
     )
     ap.add_argument(
+        "--dash_span_ratio",
+        type=float,
+        default=0.08,
+        help="Only keep dashed prediction segments within this ratio of x-span around join point.",
+    )
+    ap.add_argument(
         "--font_path",
         type=str,
         default="",
@@ -209,6 +215,8 @@ def main() -> None:
         raise ValueError(f"no data rows found in: {table_path}")
     if int(args.fit_degree) < 1:
         raise ValueError("--fit_degree must be >= 1")
+    if not (0.0 < float(args.dash_span_ratio) <= 1.0):
+        raise ValueError("--dash_span_ratio must be in (0, 1].")
 
     headers = list(rows[0].keys())
     if len(headers) < 4:
@@ -271,6 +279,7 @@ def main() -> None:
 
     x_min, x_max = 0.05, 0.3
     x_fit = np.linspace(x_min, x_max, 320)
+    dash_span = max((x_max - x_min) * float(args.dash_span_ratio), 1e-8)
     color_cycle = plt.rcParams.get("axes.prop_cycle", None)
     colors = color_cycle.by_key().get("color", []) if color_cycle is not None else []
     if not colors:
@@ -302,14 +311,18 @@ def main() -> None:
         x_join = find_intersection_x(x_fit, y_fit, y_line, x_max=0.3)
         y_join = y1 + slope * (x_join - 0.3)
 
-        x_ext_left = np.linspace(x_min, x_join, 120)
-        y_ext_left = y1 + slope * (x_ext_left - 0.3)
-        ax.plot(x_ext_left, y_ext_left, linestyle="--", linewidth=1.6, alpha=0.9, color=color)
+        if x_min < x_join:
+            x_ext_left = np.linspace(x_min, x_join, 120)
+            y_ext_left = y1 + slope * (x_ext_left - 0.3)
+            ax.plot(x_ext_left, y_ext_left, linestyle="--", linewidth=1.6, alpha=0.9, color=color)
         ax.plot([x_join, 0.5], [y_join, y2], linestyle="-", linewidth=2.2, color=color)
 
         below_mask = y_fit < y_line
+        dash_l = max(x_min, x_join - dash_span)
+        dash_r = min(x_max, x_join + dash_span)
+        dashed_mask = below_mask & (x_fit >= dash_l) & (x_fit <= dash_r)
         y_fit_solid = np.where(~below_mask, y_fit, np.nan)
-        y_fit_dashed = np.where(below_mask, y_fit, np.nan)
+        y_fit_dashed = np.where(dashed_mask, y_fit, np.nan)
         ax.plot(x_fit, y_fit_solid, linestyle="-", linewidth=2.2, color=color)
         ax.plot(x_fit, y_fit_dashed, linestyle="--", linewidth=2.2, color=color)
         ax.scatter(x_vals, y_vals, s=28, alpha=0.9, color=color)
