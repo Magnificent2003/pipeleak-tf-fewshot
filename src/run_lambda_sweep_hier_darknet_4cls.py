@@ -56,24 +56,18 @@ def parse_int_list(text: str) -> List[int]:
     return out
 
 
-def get_default_seed_values() -> List[int]:
-    seeds: List[int] = []
-    for i in range(10):
-        name = f"SEED_EXP{i}"
-        if hasattr(cfg, name):
-            seeds.append(int(getattr(cfg, name)))
-    if len(seeds) < 10:
-        base = int(getattr(cfg, "SEED", 42))
-        for i in range(len(seeds), 10):
-            seeds.append(base + i)
-    return seeds
+def get_default_seed_values(runs_per_lambda: int) -> List[int]:
+    # Repeated runs on ONE fixed dataset split:
+    # these seeds control training randomness only.
+    base = int(getattr(cfg, "SEED", 42))
+    return [base + i for i in range(runs_per_lambda)]
 
 
 def build_run_seeds(seed_values_text: str, runs_per_lambda: int) -> List[int]:
     if seed_values_text.strip():
         seeds = parse_int_list(seed_values_text)
     else:
-        seeds = get_default_seed_values()
+        seeds = get_default_seed_values(runs_per_lambda)
 
     if len(seeds) < runs_per_lambda:
         raise ValueError(
@@ -397,6 +391,8 @@ def build_payload(
             "runs_per_lambda": int(args.runs_per_lambda),
             "seed_values": [int(s) for s in run_seeds],
             "lambda_values": [float(x) for x in lambda_values],
+            "same_dataset_split": True,
+            "split_note": "Uses existing npy files under data_root; does not rebuild/switch dataset split.",
             "elapsed_sec": float(elapsed_sec),
         },
         "results": list(results),
@@ -418,7 +414,7 @@ def main() -> None:
     ap.add_argument("--early_stop", type=int, default=0)
     ap.add_argument("--warmup_child_epochs", type=int, default=150)
     ap.add_argument("--print_every", type=int, default=20)
-    ap.add_argument("--runs_per_lambda", type=int, default=10)
+    ap.add_argument("--runs_per_lambda", type=int, default=5)
     ap.add_argument("--seed_values", type=str, default="")
     ap.add_argument("--lambda_values", type=str, default="0.1,0.3,0.7,1.5,2.5,5.0")
     ap.add_argument("--device", type=str, default="")
@@ -471,6 +467,7 @@ def main() -> None:
     print(f"lambda_values  : {lambda_values}")
     print(f"run_seeds      : {run_seeds}")
     print(f"runs_per_lambda: {args.runs_per_lambda}")
+    print("split_mode     : fixed existing dataset split (no rebuild)")
     print("======================================================")
 
     ds_tr = NpyDataset(str(xtr), str(ytr), normalize="imagenet", memmap=True)
