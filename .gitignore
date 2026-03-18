@@ -10,3 +10,4 @@ data/
 *.csv
 *.png
 *.svg
+*.npy

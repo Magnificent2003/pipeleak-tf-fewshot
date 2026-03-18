@@ -9,7 +9,7 @@ plot_metric_pair(
     csv_path=base_dir / "baseline_performance_top5.csv",
     metrics=["macro-f1", "macro-recall"],
     xlabels=["Macro-F1", "Macro-Recall"],
-    ylim=(0.45, 0.85),
+    ylim=(0.40, 0.85),
     output_png=base_dir / "baseline_comparison_figure_2.png",
     output_svg=base_dir / "baseline_comparison_figure_2.svg",
 )

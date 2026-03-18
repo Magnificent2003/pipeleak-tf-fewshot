@@ -125,7 +125,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--data_root", type=str, default=cfg.DATASET)
     ap.add_argument("--batch_size", type=int, default=16)
-    ap.add_argument("--epochs", type=int, default=100)
+    ap.add_argument("--epochs", type=int, default=50)
     ap.add_argument("--lr", type=float, default=1e-3)
     ap.add_argument("--weight_decay", type=float, default=1e-4)
     ap.add_argument("--num_workers", type=int, default=0)
