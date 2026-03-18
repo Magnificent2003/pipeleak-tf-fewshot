@@ -50,18 +50,13 @@ def parse_markdown_tables(table_path: Path) -> List[List[Dict[str, str]]]:
     return tables
 
 
-def pick_table_for_lambda_b(tables: Sequence[List[Dict[str, str]]]) -> List[Dict[str, str]]:
-    # Prefer table that has λb but not λcons (pure lambda-b sensitivity table).
+def pick_table_for_lambda_cons(tables: Sequence[List[Dict[str, str]]]) -> List[Dict[str, str]]:
+    # Prefer table that explicitly has λcons column.
     for rows in tables:
         cols = set(rows[0].keys())
-        if "λb" in cols and "λcons" not in cols:
+        if "λcons" in cols:
             return rows
-    # Fallback: any table containing λb.
-    for rows in tables:
-        cols = set(rows[0].keys())
-        if "λb" in cols:
-            return rows
-    raise ValueError("No table containing column 'λb' found in markdown.")
+    raise ValueError("No table containing column 'λcons' found in markdown.")
 
 
 def try_float(v: str) -> float:
@@ -76,10 +71,8 @@ def fit_curve_logx(x_vals: Sequence[float], y_vals: Sequence[float], degree: int
 
     x = np.asarray(x_vals, dtype=np.float64)
     y = np.asarray(y_vals, dtype=np.float64)
-    logx = np.log10(x)
-
     deg = min(int(degree), len(x_vals) - 1)
-    coeff = np.polyfit(logx, y, deg=deg)
+    coeff = np.polyfit(x, y, deg=deg)
     poly = np.poly1d(coeff)
     return poly
 
@@ -104,7 +97,7 @@ def find_intersection_x(x: np.ndarray, y_a: np.ndarray, y_b: np.ndarray, x_max: 
     if change_idx.size == 0:
         return float(x_max)
 
-    i = int(change_idx[-1])  # nearest crossing to x_max
+    i = int(change_idx[-1])
     x0, x1 = float(xs[i]), float(xs[i + 1])
     d0, d1 = float(da[i]), float(da[i + 1])
     if abs(d1 - d0) < 1e-12:
@@ -115,7 +108,6 @@ def find_intersection_x(x: np.ndarray, y_a: np.ndarray, y_b: np.ndarray, x_max: 
 
 
 def configure_times_new_roman(font_path: str = "") -> str:
-    # Highest priority: user-provided font file.
     if font_path.strip():
         fp = Path(font_path).resolve()
         if fp.exists():
@@ -124,7 +116,6 @@ def configure_times_new_roman(font_path: str = "") -> str:
             plt.rcParams["font.family"] = fam
             return fam
 
-    # Then try system-installed Times New Roman families.
     candidates = [
         "Times New Roman",
         "TimesNewRoman",
@@ -139,7 +130,6 @@ def configure_times_new_roman(font_path: str = "") -> str:
         except Exception:
             continue
 
-    # Fallback: keep a serif font to avoid repeated findfont warnings.
     plt.rcParams["font.family"] = "DejaVu Serif"
     return "DejaVu Serif"
 
@@ -163,7 +153,6 @@ def resolve_table_md(table_md_arg: str) -> Path:
         if p.exists():
             return p
 
-    # Fallback: choose the newest table under runs/.
     run_roots = [cwd / "runs", project_root / "runs"]
     all_tables: List[Path] = []
     for root in run_roots:
@@ -190,13 +179,14 @@ def main() -> None:
         help="Path to markdown table file. If omitted, script auto-searches f1_curve_table.md.",
     )
     ap.add_argument("--lambda_c", type=float, default=None, help="Filter a specific λc value.")
+    ap.add_argument("--lambda_b", type=float, default=None, help="Filter a specific λb value.")
     ap.add_argument("--out_png", type=str, default="")
     ap.add_argument("--out_svg", type=str, default="")
     ap.add_argument(
         "--fit_degree",
         type=int,
-        default=3,
-        help="Polynomial degree on log10(λb) for fitted dashed curves.",
+        default=2,
+        help="Polynomial degree on λcons for fitted curves.",
     )
     ap.add_argument(
         "--font_path",
@@ -214,25 +204,24 @@ def main() -> None:
     tables = parse_markdown_tables(table_path)
     if not tables:
         raise ValueError(f"no markdown table found in: {table_path}")
-
-    rows = pick_table_for_lambda_b(tables)
+    rows = pick_table_for_lambda_cons(tables)
     if not rows:
         raise ValueError(f"no data rows found in: {table_path}")
-
-    headers = list(rows[0].keys())
-    if len(headers) < 3:
-        raise ValueError("table must contain at least 3 columns: λc, λb and one metric column")
     if int(args.fit_degree) < 1:
         raise ValueError("--fit_degree must be >= 1")
 
+    headers = list(rows[0].keys())
+    if len(headers) < 4:
+        raise ValueError("table must contain λc, λb, λcons and at least one model column")
     lambda_c_col = headers[0]
     lambda_b_col = headers[1]
-    model_cols = headers[2:]
+    lambda_cons_col = headers[2]
+    model_cols = headers[3:]
 
-    # Convert lambda values
     for r in rows:
         r[lambda_c_col] = try_float(r[lambda_c_col])
         r[lambda_b_col] = try_float(r[lambda_b_col])
+        r[lambda_cons_col] = try_float(r[lambda_cons_col])
         for c in model_cols:
             r[c] = try_float(r[c])
 
@@ -241,32 +230,47 @@ def main() -> None:
         target_lc = float(args.lambda_c)
     else:
         if len(unique_lc) > 1:
-            raise ValueError(
-                f"multiple λc values found {unique_lc}. Please set --lambda_c to choose one."
-            )
+            raise ValueError(f"multiple λc values found {unique_lc}. Please set --lambda_c.")
         target_lc = unique_lc[0]
 
-    selected = [r for r in rows if float(r[lambda_c_col]) == target_lc]
-    if not selected:
-        raise ValueError(f"no rows found for λc={target_lc}")
-    selected.sort(key=lambda x: float(x[lambda_b_col]))
+    unique_lb = sorted({r[lambda_b_col] for r in rows if float(r[lambda_c_col]) == target_lc})
+    if args.lambda_b is not None:
+        target_lb = float(args.lambda_b)
+    else:
+        if len(unique_lb) > 1:
+            raise ValueError(f"multiple λb values found {unique_lb}. Please set --lambda_b.")
+        target_lb = unique_lb[0]
 
-    x_vals = [float(r[lambda_b_col]) for r in selected]
+    selected = [
+        r
+        for r in rows
+        if abs(float(r[lambda_c_col]) - target_lc) < 1e-9 and abs(float(r[lambda_b_col]) - target_lb) < 1e-9
+    ]
+    if not selected:
+        raise ValueError(f"no rows found for λc={target_lc}, λb={target_lb}")
+    selected.sort(key=lambda x: float(x[lambda_cons_col]))
+
+    x_vals = [float(r[lambda_cons_col]) for r in selected]
     all_y_vals: List[float] = []
 
     font_used = configure_times_new_roman(args.font_path)
     plt.figure(figsize=(6.6, 4.8))
     ax = plt.gca()
 
-    # Highlight suggested lambda range.
-    ax.axvspan(0.2, 0.4, color="#f8c471", alpha=0.22)
-    ax.text(0.215, 0.985, "Suggested region", transform=ax.get_xaxis_transform(),
-            fontsize=10, va="top", color="#7d6608")
+    # Keep style consistent with lambda-b figure.
+    ax.axvspan(0.1, 0.15, color="#f8c471", alpha=0.22)
+    ax.text(
+        0.102,
+        0.985,
+        "Suggested region",
+        transform=ax.get_xaxis_transform(),
+        fontsize=10,
+        va="top",
+        color="#7d6608",
+    )
 
-    # Non-uniform x axis to emphasize the peak area.
-    ax.set_xscale("log")
-    x_min, x_max = 0.1, 2.0
-    x_fit = np.logspace(np.log10(x_min), np.log10(x_max), 320)
+    x_min, x_max = 0.05, 0.3
+    x_fit = np.linspace(x_min, x_max, 320)
     color_cycle = plt.rcParams.get("axes.prop_cycle", None)
     colors = color_cycle.by_key().get("color", []) if color_cycle is not None else []
     if not colors:
@@ -278,8 +282,8 @@ def main() -> None:
         y_vals = [float(r[col]) for r in selected]
         all_y_vals.extend(y_vals)
 
-        # 1) Fit only first four points (λ=0.1,0.2,0.3,0.5).
-        fit_pairs = [(x, y) for x, y in zip(x_vals, y_vals) if x <= 0.5]
+        # Fit first four points: λcons = 0.05, 0.1, 0.15, 0.2
+        fit_pairs = [(x, y) for x, y in zip(x_vals, y_vals) if x <= 0.2]
         fit_pairs = fit_pairs[:4]
         if len(fit_pairs) < 2:
             fit_pairs = list(zip(x_vals[:4], y_vals[:4]))
@@ -287,34 +291,29 @@ def main() -> None:
         fit_y = [p[1] for p in fit_pairs]
 
         poly = fit_curve_logx(fit_x, fit_y, degree=int(args.fit_degree))
-        y_fit = poly(np.log10(x_fit))
-        # Avoid polynomial tails going out of visible score range.
+        y_fit = poly(x_fit)
         y_fit = np.clip(y_fit, 0.0, 1.0)
 
-        # 2) Connect λ=1.0 and 2.0 with solid line, and extend with dashed line.
-        y1 = find_y_for_x(x_vals, y_vals, 1.0)
-        y2 = find_y_for_x(x_vals, y_vals, 2.0)
-        slope = (y2 - y1) / (2.0 - 1.0)
-        y_line = y1 + slope * (x_fit - 1.0)
-        x_join = find_intersection_x(x_fit, y_fit, y_line, x_max=1.0)
-        y_join = y1 + slope * (x_join - 1.0)
+        # Straight segment from λcons=0.3 to 0.5, and left extension.
+        y1 = find_y_for_x(x_vals, y_vals, 0.3)
+        y2 = find_y_for_x(x_vals, y_vals, 0.5)
+        slope = (y2 - y1) / (0.5 - 0.3)
+        y_line = y1 + slope * (x_fit - 0.3)
+        x_join = find_intersection_x(x_fit, y_fit, y_line, x_max=0.3)
+        y_join = y1 + slope * (x_join - 0.3)
 
         x_ext_left = np.linspace(x_min, x_join, 120)
-        y_ext_left = y1 + slope * (x_ext_left - 1.0)
+        y_ext_left = y1 + slope * (x_ext_left - 0.3)
         ax.plot(x_ext_left, y_ext_left, linestyle="--", linewidth=1.6, alpha=0.9, color=color)
-        ax.plot([x_join, 2.0], [y_join, y2], linestyle="-", linewidth=2.2, color=color)
+        ax.plot([x_join, 0.5], [y_join, y2], linestyle="-", linewidth=2.2, color=color)
 
-        # 3) Fitted curve under the straight line is dashed; above stays solid.
         below_mask = y_fit < y_line
         y_fit_solid = np.where(~below_mask, y_fit, np.nan)
         y_fit_dashed = np.where(below_mask, y_fit, np.nan)
         ax.plot(x_fit, y_fit_solid, linestyle="-", linewidth=2.2, color=color)
         ax.plot(x_fit, y_fit_dashed, linestyle="--", linewidth=2.2, color=color)
-
-        # Keep raw observations as markers.
         ax.scatter(x_vals, y_vals, s=28, alpha=0.9, color=color)
 
-        # 4) Keep legend entries unchanged, but always show solid style.
         legend_handles.append(Line2D([0], [0], color=color, linestyle="-", linewidth=2.2, label=col))
 
     if all_y_vals:
@@ -324,10 +323,10 @@ def main() -> None:
             ax.set_ylim(y_min, y_max)
 
     ax.set_xlim(x_min, x_max)
-    ax.set_xticks([0.1, 0.2, 0.3, 0.5, 1.0, 2.0])
-    ax.set_xticklabels(["0.1", "0.2", "0.3", "0.5", "1.0", "2.0"])
+    ax.set_xticks([0.05, 0.1, 0.15, 0.2, 0.25, 0.3])
+    ax.set_xticklabels(["0.05", "0.1", "0.15", "0.2", "0.25", "0.3"])
 
-    ax.set_xlabel("λb")
+    ax.set_xlabel("λcons")
     ax.set_ylabel("Macro-F1 Score")
     ax.grid(True, linestyle="--", alpha=0.35)
     ax.legend(
@@ -343,16 +342,17 @@ def main() -> None:
     if args.out_png.strip():
         out_png = Path(args.out_png).resolve()
     else:
-        out_png = table_path.with_name("lambda_b_sensitivity_curve.png")
+        out_png = table_path.with_name("lambda_cons_sensitivity_curve.png")
     if args.out_svg.strip():
         out_svg = Path(args.out_svg).resolve()
     else:
-        out_svg = table_path.with_name("lambda_b_sensitivity_curve.svg")
+        out_svg = table_path.with_name("lambda_cons_sensitivity_curve.svg")
 
     out_png.parent.mkdir(parents=True, exist_ok=True)
     out_svg.parent.mkdir(parents=True, exist_ok=True)
     plt.savefig(out_png, dpi=300, bbox_inches="tight", pad_inches=0.02)
     plt.savefig(out_svg, bbox_inches="tight", pad_inches=0.02)
+
     print(f"[INFO] Font used: {font_used}")
     if font_used.lower() not in {"times new roman", "timesnewroman", "times new roman mt", "times"}:
         print("[WARN] Times New Roman not found. Use --font_path to provide a TTF/OTF file if needed.")
