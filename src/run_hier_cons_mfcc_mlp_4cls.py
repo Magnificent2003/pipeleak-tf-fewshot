@@ -416,7 +416,7 @@ def main():
     ap.add_argument("--epochs_stage1", type=int, default=300)
     ap.add_argument("--patience_stage1", type=int, default=30)
     ap.add_argument("--lr_stage1", type=float, default=1e-3)
-    ap.add_argument("--lambda_child", type=float, default=0)
+    ap.add_argument("--lambda_child", type=float, default=0.3)
 
     # Stage 2: consistency-on training
     ap.add_argument("--epochs_stage2", type=int, default=150)
