@@ -268,7 +268,7 @@ def main() -> None:
 
     # Highlight suggested lambda range.
     ax.axvspan(0.2, 0.4, color="#f8c471", alpha=0.22)
-    ax.text(0.215, 0.985, "Suggested region", transform=ax.get_xaxis_transform(),
+    ax.text(0.215, 0.985, "Recommended region", transform=ax.get_xaxis_transform(),
             fontsize=10, va="top", color="#7d6608")
 
     # Non-uniform x axis to emphasize the peak area.
@@ -340,7 +340,7 @@ def main() -> None:
     ax.set_xticks([0.1, 0.2, 0.3, 0.5, 1.0, 2.0])
     ax.set_xticklabels(["0.1", "0.2", "0.3", "0.5", "1.0", "2.0"])
 
-    ax.set_xlabel("λb")
+    ax.set_xlabel(r"$\mathit{\lambda}_{\mathit{b}}$")
     ax.set_ylabel("Macro-F1 Score")
     ax.grid(True, linestyle="--", alpha=0.35)
     ax.legend(

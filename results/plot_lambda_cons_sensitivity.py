@@ -270,7 +270,7 @@ def main() -> None:
     ax.text(
         0.102,
         0.985,
-        "Suggested region",
+        "Recommended region",
         transform=ax.get_xaxis_transform(),
         fontsize=10,
         va="top",
@@ -339,8 +339,8 @@ def main() -> None:
     ax.set_xticks([0.05, 0.1, 0.15, 0.2, 0.25, 0.3])
     ax.set_xticklabels(["0.05", "0.1", "0.15", "0.2", "0.25", "0.3"])
 
-    ax.set_xlabel("λcons")
-    ax.set_ylabel("Macro-F1 Score")
+    ax.set_xlabel(r"$\mathit{\lambda}_{\mathrm{cons}}$")
+    ax.set_ylabel("Parent-F1 Score")
     ax.grid(True, linestyle="--", alpha=0.35)
     ax.legend(
         handles=legend_handles,
