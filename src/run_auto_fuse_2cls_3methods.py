@@ -34,6 +34,13 @@ def choose_python_exe(cli_python: str, project_root: Path) -> str:
     return sys.executable
 
 
+def resolve_user_path(path_text: str, project_root: Path) -> str:
+    p = Path(path_text.strip())
+    if p.is_absolute():
+        return str(p)
+    return str((project_root / p).resolve())
+
+
 def collect_new_csv(
     csv_dir: Path,
     before: Sequence[Path],
@@ -241,9 +248,9 @@ def main():
         "--log_dir", str(csv_dir),
     ]
     if args.ckpt_resnet.strip():
-        common_args += ["--ckpt_resnet", args.ckpt_resnet]
+        common_args += ["--ckpt_resnet", resolve_user_path(args.ckpt_resnet, project_root)]
     if args.ckpt_darknet.strip():
-        common_args += ["--ckpt_darknet", args.ckpt_darknet]
+        common_args += ["--ckpt_darknet", resolve_user_path(args.ckpt_darknet, project_root)]
 
     for method, script in METHOD_SCRIPTS:
         script_path = src_dir / script

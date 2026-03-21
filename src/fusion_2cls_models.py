@@ -9,13 +9,13 @@ def _safe_logit(p: torch.Tensor, eps: float = 1e-6) -> torch.Tensor:
     return torch.log(p) - torch.log(1.0 - p)
 
 
-def _binary_entropy_from_prob(p: torch.Tensor, eps: float = 1e-9) -> torch.Tensor:
+def _binary_entropy_from_prob(p: torch.Tensor, eps: float = 1e-6) -> torch.Tensor:
     p = torch.clamp(p, eps, 1.0 - eps)
     return -(p * torch.log(p) + (1.0 - p) * torch.log(1.0 - p))
 
 
 def _positive_prob_from_logits(logits: torch.Tensor) -> torch.Tensor:
-    return torch.softmax(logits, dim=1)[:, 1]
+    return torch.clamp(torch.softmax(logits, dim=1)[:, 1], 1e-6, 1.0 - 1e-6)
 
 
 class CWGFFusion2Cls(nn.Module):

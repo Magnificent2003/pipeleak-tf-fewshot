@@ -117,7 +117,7 @@ def bce_on_probs(p: torch.Tensor, y: torch.Tensor, w_pos: float = 1.0, w_neg: fl
     return (-w_pos * y * torch.log(p) - w_neg * (1 - y) * torch.log(1 - p)).mean()
 
 
-def entropy_pos(p: torch.Tensor, eps: float = 1e-9):
+def entropy_pos(p: torch.Tensor, eps: float = 1e-6):
     p = torch.clamp(p, eps, 1.0 - eps)
     return (-(p * torch.log(p) + (1 - p) * torch.log(1 - p))).mean()
 
