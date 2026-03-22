@@ -168,11 +168,12 @@ def plot_dual_axis(
     x = np.arange(len(fractions), dtype=np.float64)
 
     fig, ax1 = plt.subplots(figsize=(10.5, 7.6), dpi=300)
-    bg = "#f2f2f2"
-    fig.patch.set_facecolor(bg)
-    ax1.set_facecolor(bg)
+    fig.patch.set_facecolor("none")
+    fig.patch.set_alpha(0.0)
+    ax1.set_facecolor("none")
 
     ax2 = ax1.twinx()
+    ax2.set_facecolor("none")
     ax1.set_zorder(3)
     ax1.patch.set_alpha(0.0)
 
@@ -254,8 +255,8 @@ def plot_dual_axis(
 
     fig.tight_layout()
     out_png.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out_png, dpi=600, bbox_inches="tight")
-    fig.savefig(out_svg, bbox_inches="tight")
+    fig.savefig(out_png, dpi=600, bbox_inches="tight", transparent=True)
+    fig.savefig(out_svg, bbox_inches="tight", transparent=True)
     plt.close(fig)
 
 
