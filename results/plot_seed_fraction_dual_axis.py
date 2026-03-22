@@ -21,7 +21,7 @@ Z_95 = 1.96
 
 MODEL_ORDER = ["DarkNet", "MFCC-MLP", "CWGF(MFCC+DarkNet)"]
 MODEL_STYLE = {
-    "DarkNet": {"color": "#111111", "marker": "s", "label": "DarkNet"},
+    "DarkNet": {"color": "#111111", "marker": "s", "label": "DarkNet-19"},
     "MFCC-MLP": {"color": "#1f4fff", "marker": "o", "label": "MFCC-MLP"},
     "CWGF(MFCC+DarkNet)": {"color": "#e31a1c", "marker": "v", "label": "CWGF"},
 }
