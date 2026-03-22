@@ -33,6 +33,19 @@ class MLP4(nn.Module):
         return self.net(x)
 
 
+def safe_torch_load(path: str, map_location: str = "cpu"):
+    """
+    PyTorch 2.6 changed torch.load default to weights_only=True.
+    Our checkpoints include numpy arrays (mfcc_cfg/feat stats), so we need
+    weights_only=False on trusted local checkpoints.
+    """
+    try:
+        return torch.load(path, map_location=map_location, weights_only=False)
+    except TypeError:
+        # Older torch versions may not accept weights_only.
+        return torch.load(path, map_location=map_location)
+
+
 def set_seed(seed: int) -> None:
     random.seed(seed)
     np.random.seed(seed)
@@ -83,7 +96,7 @@ def _find_linear_dims_from_state_dict(state: Dict[str, torch.Tensor]) -> Tuple[i
 def load_mfcc_mlp_4cls(
     ckpt_path: str, device: torch.device
 ) -> Tuple[nn.Module, Dict[str, float], np.ndarray, np.ndarray]:
-    ck = torch.load(ckpt_path, map_location="cpu")
+    ck = safe_torch_load(ckpt_path, map_location="cpu")
     state = strip_module_prefix(ck.get("state_dict", ck))
 
     in_dim, hidden, out_dim = _find_linear_dims_from_state_dict(state)
@@ -108,7 +121,7 @@ def load_mfcc_mlp_4cls(
 
 
 def load_darknet_4cls(ckpt_path: str, device: torch.device) -> nn.Module:
-    ck = torch.load(ckpt_path, map_location="cpu")
+    ck = safe_torch_load(ckpt_path, map_location="cpu")
     state = strip_module_prefix(ck.get("state_dict", ck))
     num_classes = int(ck.get("num_classes", 4))
     model = Darknet19(num_classes=num_classes)
