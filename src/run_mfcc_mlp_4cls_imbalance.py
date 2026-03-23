@@ -5,16 +5,40 @@ import random
 import time
 from typing import Dict, Tuple
 
+import librosa
 import numpy as np
 import torch
 import torch.nn as nn
-import torch.optim as optim
 from sklearn.metrics import accuracy_score, f1_score
-from torch.utils.data import DataLoader, Subset
+from torch.utils.data import DataLoader, Dataset
 
 import config as cfg
-from Darknet19 import Darknet19
-from NpyDataset import NpyDataset
+
+
+class NpyDataset(Dataset):
+    def __init__(self, X: np.ndarray, y: np.ndarray):
+        self.X = X.astype(np.float32)
+        self.y = y.astype(np.int64)
+
+    def __len__(self):
+        return self.X.shape[0]
+
+    def __getitem__(self, i):
+        return torch.from_numpy(self.X[i]), torch.tensor(int(self.y[i]), dtype=torch.long)
+
+
+class MLP4(nn.Module):
+    def __init__(self, in_dim: int, hidden: int = 128, p_drop: float = 0.2, num_classes: int = 4):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(in_dim, hidden),
+            nn.ReLU(inplace=True),
+            nn.Dropout(p_drop),
+            nn.Linear(hidden, num_classes),
+        )
+
+    def forward(self, x):
+        return self.net(x)
 
 
 class FocalLossMultiClass(nn.Module):
@@ -61,21 +85,16 @@ def confusion_matrix_np(y_true: np.ndarray, y_pred: np.ndarray, num_classes: int
 
 
 def valve_parent_metrics_from_cm4(cm4: np.ndarray) -> Dict[str, float]:
-    # Valve class = y4==1
     tp = int(cm4[1, 1])
     fn = int(cm4[1, :].sum() - tp)
     fp = int(cm4[:, 1].sum() - tp)
     valve_recall = tp / max(tp + fn, 1)
     valve_f1 = (2.0 * tp) / max(2 * tp + fp + fn, 1)
 
-    # Cross-parent error: true {2,3} predicted {0,1}
     num = int(cm4[2, 0] + cm4[2, 1] + cm4[3, 0] + cm4[3, 1])
     den = int(cm4[2, :].sum() + cm4[3, :].sum())
     cross_parent_err = num / max(den, 1)
 
-    # Parent-level leak recall:
-    # parent leak class = {0,1} -> class 0 in parent space
-    # parent no-leak class = {2,3} -> class 1 in parent space
     cm_parent = np.array(
         [
             [cm4[0:2, 0:2].sum(), cm4[0:2, 2:4].sum()],
@@ -143,6 +162,59 @@ def train_one_epoch(model, loader, criterion, optimizer, device) -> float:
     return loss_sum / max(n, 1)
 
 
+def mfcc_stats_1d(
+    sig: np.ndarray,
+    sr: int,
+    n_fft: int,
+    win_length: int,
+    hop_length: int,
+    window: str,
+    n_mels: int,
+    n_mfcc: int,
+    fmin: float,
+    fmax: float,
+    center: bool,
+) -> np.ndarray:
+    x = np.asarray(sig, dtype=np.float32).reshape(-1)
+    mfcc = librosa.feature.mfcc(
+        y=x,
+        sr=sr,
+        n_mfcc=n_mfcc,
+        n_fft=n_fft,
+        win_length=win_length,
+        hop_length=hop_length,
+        window=window,
+        center=center,
+        n_mels=n_mels,
+        fmin=fmin,
+        fmax=fmax,
+    )
+    return np.concatenate([mfcc.mean(axis=1), mfcc.std(axis=1)], axis=0).astype(np.float32)
+
+
+def extract_mfcc_stats_split(X: np.ndarray, args, tag: str) -> np.ndarray:
+    feats = []
+    n = X.shape[0]
+    for i in range(n):
+        f = mfcc_stats_1d(
+            X[i],
+            sr=args.sr,
+            n_fft=args.n_fft,
+            win_length=args.win_length,
+            hop_length=args.hop_length,
+            window=args.window,
+            n_mels=args.n_mels,
+            n_mfcc=args.n_mfcc,
+            fmin=args.fmin,
+            fmax=args.fmax,
+            center=bool(args.center),
+        )
+        feats.append(f)
+        if (i + 1) % 200 == 0 or (i + 1) == n:
+            print(f"[MFCC-{tag}] {i + 1}/{n} done")
+    return np.vstack(feats).astype(np.float32)
+
+
 def parse_counts(text: str, num_classes: int) -> np.ndarray:
     parts = [p.strip() for p in text.split(",") if p.strip()]
     if len(parts) != num_classes:
@@ -188,7 +260,6 @@ def select_leak_fraction_subset(y: np.ndarray, leak_fraction: float, seed: int) 
 
 
 def build_class_weights_from_counts(counts: np.ndarray) -> np.ndarray:
-    # inverse frequency then normalized to average weight = 1
     inv = 1.0 / np.maximum(counts.astype(np.float64), 1.0)
     w = inv * (len(inv) / np.sum(inv))
     return w.astype(np.float32)
@@ -196,16 +267,29 @@ def build_class_weights_from_counts(counts: np.ndarray) -> np.ndarray:
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--data_root", type=str, default=cfg.DATASET_STFT)
+    ap.add_argument("--data_root", type=str, default=cfg.DATASET)
     ap.add_argument("--label_prefix", type=str, default="y4")
-    ap.add_argument("--num_classes", type=int, default=4)
-    ap.add_argument("--img_size", type=int, default=cfg.IMG_SIZE)
+
+    ap.add_argument("--sr", type=int, default=getattr(cfg, "FS", 8192))
+    ap.add_argument("--n_fft", type=int, default=256)
+    ap.add_argument("--win_length", type=int, default=256)
+    ap.add_argument("--hop_length", type=int, default=128)
+    ap.add_argument("--window", type=str, default="hamming")
+    ap.add_argument("--n_mels", type=int, default=40)
+    ap.add_argument("--n_mfcc", type=int, default=20)
+    ap.add_argument("--fmin", type=float, default=20.0)
+    ap.add_argument("--fmax", type=float, default=-1.0)
+    ap.add_argument("--center", type=int, default=1)
+
     ap.add_argument("--batch_size", type=int, default=64)
-    ap.add_argument("--epochs", type=int, default=200)
+    ap.add_argument("--batch_size_eval", type=int, default=256)
+    ap.add_argument("--epochs", type=int, default=300)
     ap.add_argument("--lr", type=float, default=1e-3)
     ap.add_argument("--weight_decay", type=float, default=1e-4)
+    ap.add_argument("--hidden", type=int, default=128)
+    ap.add_argument("--dropout", type=float, default=0.2)
+    ap.add_argument("--patience", type=int, default=30)
     ap.add_argument("--num_workers", type=int, default=0)
-    ap.add_argument("--early_stop", type=int, default=0)
     ap.add_argument("--seed", type=int, default=int(getattr(cfg, "SEED", 2023)))
     ap.add_argument("--save_dir", type=str, default=cfg.CKPT_DIR)
     ap.add_argument("--log_dir", type=str, default=cfg.LOG_DIR)
@@ -224,60 +308,70 @@ def main():
     if bool(args.save_ckpt):
         os.makedirs(args.save_dir, exist_ok=True)
 
-    num_classes = int(args.num_classes)
+    if args.fmax <= 0:
+        args.fmax = float(args.sr) / 2.0
+    if args.fmin < 0 or args.fmin >= args.fmax:
+        raise ValueError(f"Invalid fmin/fmax: fmin={args.fmin}, fmax={args.fmax}")
+
+    xtr = np.load(os.path.join(args.data_root, "X_train.npy"))
+    xva = np.load(os.path.join(args.data_root, "X_val.npy"))
+    xte = np.load(os.path.join(args.data_root, "X_test.npy"))
+    ytr_full = np.load(os.path.join(args.data_root, f"{args.label_prefix}_train.npy")).astype(np.int64)
+    yva = np.load(os.path.join(args.data_root, f"{args.label_prefix}_val.npy")).astype(np.int64)
+    yte = np.load(os.path.join(args.data_root, f"{args.label_prefix}_test.npy")).astype(np.int64)
+    num_classes = int(max(ytr_full.max(), yva.max(), yte.max()) + 1)
     if num_classes != 4:
-        raise ValueError("This script is designed for 4-class setting (num_classes=4).")
-
-    xtr = os.path.join(args.data_root, f"X_train_stft_{args.img_size}.npy")
-    xva = os.path.join(args.data_root, f"X_val_stft_{args.img_size}.npy")
-    xte = os.path.join(args.data_root, f"X_test_stft_{args.img_size}.npy")
-    ytr = os.path.join(args.data_root, f"{args.label_prefix}_train.npy")
-    yva = os.path.join(args.data_root, f"{args.label_prefix}_val.npy")
-    yte = os.path.join(args.data_root, f"{args.label_prefix}_test.npy")
-
-    ds_tr_full = NpyDataset(xtr, ytr, normalize="imagenet", memmap=True)
-    ds_va = NpyDataset(xva, yva, normalize="imagenet", memmap=True)
-    ds_te = NpyDataset(xte, yte, normalize="imagenet", memmap=True)
-    y_tr_full = ds_tr_full.y.astype(np.int64)
+        raise ValueError(f"This script is for 4-class setting, got num_classes={num_classes}")
 
     if args.subset_mode == "fixed_counts":
         desired_counts = parse_counts(args.train_counts, num_classes=num_classes)
-        selected_idx = select_fixed_counts_per_class(y_tr_full, desired_counts, seed=int(args.seed))
+        selected_idx = select_fixed_counts_per_class(ytr_full, desired_counts, seed=int(args.seed))
         subset_desc = f"fixed_counts={desired_counts.tolist()}"
     else:
         desired_counts = None
-        selected_idx = select_leak_fraction_subset(
-            y_tr_full, leak_fraction=float(args.leak_fraction), seed=int(args.seed)
-        )
+        selected_idx = select_leak_fraction_subset(ytr_full, leak_fraction=float(args.leak_fraction), seed=int(args.seed))
         subset_desc = f"leak_fraction={float(args.leak_fraction):.3f} (classes 0/1 reduced only)"
-    ds_tr = Subset(ds_tr_full, selected_idx.tolist())
 
-    y_sel = y_tr_full[selected_idx]
-    sel_counts = np.bincount(y_sel, minlength=num_classes).astype(np.int64)
+    xtr = xtr[selected_idx]
+    ytr = ytr_full[selected_idx]
+    sel_counts = np.bincount(ytr, minlength=num_classes).astype(np.int64)
     class_w_np = build_class_weights_from_counts(sel_counts)
     class_w_t = torch.tensor(class_w_np, dtype=torch.float32, device=device)
 
     print(f"[Seed] {args.seed}")
-    print(f"[Train subset] selected={len(selected_idx)} / full={len(ds_tr_full)}")
+    print(f"[Train subset] selected={len(selected_idx)} / full={len(ytr_full)}")
     print(f"[Subset mode] {subset_desc}")
     if desired_counts is not None:
         print(f"[Train subset y4 counts] {sel_counts.tolist()} (target={desired_counts.tolist()})")
     else:
         print(f"[Train subset y4 counts] {sel_counts.tolist()}")
     print(f"[Class weights] {class_w_np.tolist()} | mean={float(class_w_np.mean()):.4f}")
-    print(f"[Val/Test size] {len(ds_va)}/{len(ds_te)}")
+
+    print("Extracting MFCC mean+std features ...")
+    ftr = extract_mfcc_stats_split(xtr, args, tag="train")
+    fva = extract_mfcc_stats_split(xva, args, tag="val")
+    fte = extract_mfcc_stats_split(xte, args, tag="test")
+
+    mu = ftr.mean(axis=0, keepdims=True)
+    sg = ftr.std(axis=0, keepdims=True) + 1e-6
+    ftr = (ftr - mu) / sg
+    fva = (fva - mu) / sg
+    fte = (fte - mu) / sg
 
     tr_loader = DataLoader(
-        ds_tr, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers, pin_memory=True
+        NpyDataset(ftr, ytr), batch_size=args.batch_size, shuffle=True,
+        num_workers=args.num_workers, pin_memory=True
     )
     va_loader = DataLoader(
-        ds_va, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers, pin_memory=True
+        NpyDataset(fva, yva), batch_size=args.batch_size_eval, shuffle=False,
+        num_workers=args.num_workers, pin_memory=True
     )
     te_loader = DataLoader(
-        ds_te, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers, pin_memory=True
+        NpyDataset(fte, yte), batch_size=args.batch_size_eval, shuffle=False,
+        num_workers=args.num_workers, pin_memory=True
     )
 
-    model = Darknet19(num_classes=num_classes).to(device)
+    model = MLP4(in_dim=ftr.shape[1], hidden=args.hidden, p_drop=args.dropout, num_classes=num_classes).to(device)
     if args.loss_type == "ce":
         criterion = nn.CrossEntropyLoss()
     elif args.loss_type == "weighted_ce":
@@ -287,13 +381,12 @@ def main():
     else:
         raise ValueError(f"Unsupported loss_type={args.loss_type}")
 
-    optimizer = optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
-    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=20, gamma=0.5)
 
     stamp = time.strftime("%Y%m%d-%H%M%S")
-    log_name = f"metrics_darknet19_4cls_imbalance_{args.loss_type}_{stamp}.csv"
-    log_path = os.path.join(args.log_dir, log_name)
-    ckpt_path = os.path.join(args.save_dir, f"darknet19_4cls_imbalance_{args.loss_type}_best_{stamp}.pth")
+    log_path = os.path.join(args.log_dir, f"metrics_mlp_mfcc_4cls_imbalance_{args.loss_type}_{stamp}.csv")
+    ckpt_path = os.path.join(args.save_dir, f"mlp_mfcc_4cls_imbalance_{args.loss_type}_best_{stamp}.pt")
 
     fields = [
         "epoch",
@@ -322,9 +415,9 @@ def main():
 
     best_val_valve_f1 = -1.0
     best_state = None
-    patience, noimp = int(args.early_stop), 0
+    no_improve = 0
 
-    for ep in range(1, int(args.epochs) + 1):
+    for ep in range(1, args.epochs + 1):
         tr_loss = train_one_epoch(model, tr_loader, criterion, optimizer, device)
         va_loss, va_m = evaluate_4cls(model, va_loader, criterion, device, num_classes=num_classes)
         scheduler.step()
@@ -365,23 +458,38 @@ def main():
         if va_m["valve_f1"] > best_val_valve_f1:
             best_val_valve_f1 = va_m["valve_f1"]
             best_state = {k: v.detach().cpu() for k, v in model.state_dict().items()}
-            noimp = 0
+            no_improve = 0
             if bool(args.save_ckpt):
                 torch.save(
                     {
+                        "model": "MLP4_MFCC",
                         "state_dict": best_state,
                         "num_classes": num_classes,
                         "seed": int(args.seed),
                         "loss_type": args.loss_type,
+                        "mfcc_cfg": {
+                            "sr": args.sr,
+                            "n_fft": args.n_fft,
+                            "win_length": args.win_length,
+                            "hop_length": args.hop_length,
+                            "window": args.window,
+                            "n_mels": args.n_mels,
+                            "n_mfcc": args.n_mfcc,
+                            "fmin": args.fmin,
+                            "fmax": args.fmax,
+                            "center": bool(args.center),
+                        },
+                        "feat_mu": mu.squeeze(0).astype(np.float32),
+                        "feat_sigma": sg.squeeze(0).astype(np.float32),
                         "train_counts": sel_counts.tolist(),
                         "class_weights": class_w_np.tolist(),
                     },
                     ckpt_path,
                 )
         else:
-            noimp += 1
-            if patience > 0 and noimp >= patience:
-                print(f"[EarlyStop] no improvement for {patience} epochs.")
+            no_improve += 1
+            if args.patience > 0 and no_improve >= args.patience:
+                print(f"[EarlyStop] no improvement for {args.patience} epochs.")
                 break
 
     if best_state is not None:

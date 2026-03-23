@@ -209,18 +209,31 @@ def parent_metrics_from_cm4(cm4: np.ndarray):
     fn = int(cm_parent[1, 0])
     parent_rec = tp / max(tp + fn, 1)
     parent_f1 = (2.0 * tp) / max(2 * tp + fp + fn, 1)
-    return cm_parent, float(parent_f1), float(parent_rec)
+    parent_leak_recall = int(cm_parent[0, 0]) / max(int(cm_parent[0, :].sum()), 1)
+    cross_parent_err = int(cm_parent[1, 0]) / max(int(cm_parent[1, :].sum()), 1)
+    return cm_parent, float(parent_f1), float(parent_rec), float(parent_leak_recall), float(cross_parent_err)
 
 
 def metrics_4cls_and_parent(p: np.ndarray, y4: np.ndarray):
     yhat = p.argmax(axis=1).astype(np.int64)
     cm4 = confusion_matrix(y4, yhat, labels=[0, 1, 2, 3])
-    cm_parent, parent_f1, parent_rec = parent_metrics_from_cm4(cm4)
+    cm_parent, parent_f1, parent_rec, parent_leak_recall, cross_parent_err = parent_metrics_from_cm4(cm4)
+
+    # Valve class metrics (class=1)
+    tp = int(cm4[1, 1])
+    fn = int(cm4[1, :].sum() - tp)
+    fp = int(cm4[:, 1].sum() - tp)
+    valve_recall = tp / max(tp + fn, 1)
+    valve_f1 = (2.0 * tp) / max(2 * tp + fp + fn, 1)
     return {
         "macro_f1": macro_f1(y4, yhat),
         "macro_rec": macro_rec(y4, yhat),
         "parent_f1": parent_f1,
         "parent_rec": parent_rec,
+        "parent_leak_recall": parent_leak_recall,
+        "cross_parent_err": cross_parent_err,
+        "valve_recall": float(valve_recall),
+        "valve_f1": float(valve_f1),
         "cm4": cm4,
         "cm_parent": cm_parent,
     }
@@ -361,6 +374,26 @@ def load_raw_splits_4cls(data_root_raw: str):
     return out
 
 
+def select_leak_fraction_subset(y: np.ndarray, leak_fraction: float, seed: int) -> np.ndarray:
+    if leak_fraction <= 0 or leak_fraction > 1:
+        raise ValueError(f"leak_fraction must be in (0,1], got {leak_fraction}")
+    rng = np.random.default_rng(seed)
+    selected = []
+    for cls in [0, 1]:
+        idx = np.where(y == cls)[0]
+        keep = max(1, int(round(len(idx) * leak_fraction)))
+        if len(idx) < keep:
+            raise ValueError(f"class {cls} has only {len(idx)} samples, but need {keep}")
+        pick = rng.choice(idx, size=keep, replace=False)
+        selected.append(pick)
+    for cls in [2, 3]:
+        idx = np.where(y == cls)[0]
+        selected.append(idx)
+    out = np.concatenate(selected, axis=0)
+    rng.shuffle(out)
+    return out.astype(np.int64)
+
+
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser()
     ap.add_argument("--data_root_raw", type=str, default=cfg.DATASET)
@@ -380,6 +413,8 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--gate_center", type=float, default=1e-3)
     ap.add_argument("--eval_every", type=int, default=10)
     ap.add_argument("--seed", type=int, default=int(getattr(cfg, "SEED", 2023)))
+    ap.add_argument("--subset_mode", type=str, default="full", choices=["full", "leak_fraction"])
+    ap.add_argument("--leak_fraction", type=float, default=1.0)
 
     ap.add_argument("--save_dir", type=str, default=cfg.CKPT_DIR)
     ap.add_argument("--log_dir", type=str, default=cfg.LOG_DIR)
@@ -458,6 +493,18 @@ def run_fusion(args) -> None:
     z_mfcc_va = logits_from_mlp(model_mfcc, f_va, args.batch_size, device)
     z_mfcc_te = logits_from_mlp(model_mfcc, f_te, args.batch_size, device)
 
+    if args.subset_mode == "leak_fraction":
+        idx = select_leak_fraction_subset(y4_tr, leak_fraction=float(args.leak_fraction), seed=int(args.seed))
+        z_dark_tr = z_dark_tr[idx]
+        z_mfcc_tr = z_mfcc_tr[idx]
+        y4_tr = y4_tr[idx]
+        print(
+            f"[Subset] mode=leak_fraction, frac={float(args.leak_fraction):.3f}, "
+            f"train={len(idx)}/{len(raw['y4_train'])}, counts={np.bincount(y4_tr, minlength=4).tolist()}"
+        )
+    else:
+        print(f"[Subset] mode=full, train={len(y4_tr)}")
+
     p_dark_tr = probs_from_logits_np(z_dark_tr)
     p_dark_va = probs_from_logits_np(z_dark_va)
     p_dark_te = probs_from_logits_np(z_dark_te)
@@ -534,8 +581,16 @@ def run_fusion(args) -> None:
     m_mfcc = metrics_4cls_and_parent(p_mfcc_te, y4_te)
 
     print(
-        "[TEST][FUSE] macro_f1={:.4f} macro_rec={:.4f} parent_f1={:.4f} parent_rec={:.4f}".format(
-            m_fuse["macro_f1"], m_fuse["macro_rec"], m_fuse["parent_f1"], m_fuse["parent_rec"]
+        "[TEST][FUSE] macro_f1={:.4f} macro_rec={:.4f} parent_f1={:.4f} parent_rec={:.4f} "
+        "parent_leak_R={:.4f} valve_R={:.4f} valve_F1={:.4f} cross_parent_err={:.4f}".format(
+            m_fuse["macro_f1"],
+            m_fuse["macro_rec"],
+            m_fuse["parent_f1"],
+            m_fuse["parent_rec"],
+            m_fuse["parent_leak_recall"],
+            m_fuse["valve_recall"],
+            m_fuse["valve_f1"],
+            m_fuse["cross_parent_err"],
         )
     )
     print("[TEST][DarkNet] macro_f1={:.4f} parent_f1={:.4f}".format(m_dark["macro_f1"], m_dark["parent_f1"]))
@@ -570,6 +625,10 @@ def run_fusion(args) -> None:
                 "test_macro_recall",
                 "test_parent_f1",
                 "test_parent_recall",
+                "test_parent_leak_recall",
+                "test_valve_recall",
+                "test_valve_f1",
+                "test_cross_parent_err",
             ],
         )
         w.writeheader()
@@ -582,6 +641,10 @@ def run_fusion(args) -> None:
                 "test_macro_recall": f"{m_fuse['macro_rec']:.6f}",
                 "test_parent_f1": f"{m_fuse['parent_f1']:.6f}",
                 "test_parent_recall": f"{m_fuse['parent_rec']:.6f}",
+                "test_parent_leak_recall": f"{m_fuse['parent_leak_recall']:.6f}",
+                "test_valve_recall": f"{m_fuse['valve_recall']:.6f}",
+                "test_valve_f1": f"{m_fuse['valve_f1']:.6f}",
+                "test_cross_parent_err": f"{m_fuse['cross_parent_err']:.6f}",
             }
         )
     print(f"[LOG] {log_path}")
