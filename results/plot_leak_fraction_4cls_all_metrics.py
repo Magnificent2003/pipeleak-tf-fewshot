@@ -241,12 +241,12 @@ def plot_all_metrics(df: pd.DataFrame, out_png: Path, out_svg: Path) -> None:
             zorder=2.4,
         )
 
-        ax1.set_title(m["title"], fontsize=18, pad=8, fontweight="semibold")
+        ax1.set_title(m["title"], fontsize=22, pad=8, fontweight="semibold")
         ax1.set_xticks(x)
-        ax1.set_xticklabels([f"{f:.1f}" for f in fracs], fontsize=14)
-        ax1.set_xlabel("Leak Fraction", fontsize=16, labelpad=6, fontweight="semibold")
-        ax1.set_ylabel("Score", fontsize=16, labelpad=6, fontweight="semibold")
-        ax2.set_ylabel("CWGF Gain vs Best Single Expert (%)", fontsize=14, labelpad=7, fontweight="semibold")
+        ax1.set_xticklabels([f"{f:.1f}" for f in fracs], fontsize=18)
+        ax1.set_xlabel("Leak Fraction", fontsize=20, labelpad=6, fontweight="semibold")
+        ax1.set_ylabel("Score", fontsize=20, labelpad=6, fontweight="semibold")
+        ax2.set_ylabel("CWGF Gain vs Best Single Expert (%)", fontsize=18, labelpad=7, fontweight="semibold")
         ax1.set_ylim(ylo, yhi)
         ax2.set_ylim(glo, ghi)
         ax1.minorticks_off()
@@ -282,7 +282,7 @@ def plot_all_metrics(df: pd.DataFrame, out_png: Path, out_svg: Path) -> None:
         loc="lower center",
         ncol=6,
         frameon=False,
-        fontsize=13.2,
+        fontsize=18,
         bbox_to_anchor=(0.5, -0.02),
     )
 

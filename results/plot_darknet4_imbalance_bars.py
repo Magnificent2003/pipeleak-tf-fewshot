@@ -139,7 +139,7 @@ def plot_grouped_bars(
             capthick=1.0,
             zorder=4,
         )
-        _annotate_bars(ax, bars, y, dy=0.008, fontsize=10.5)
+        _annotate_bars(ax, bars, y, dy=0.008, fontsize=15)
         left_handles.append(bars)
 
     metric_r, label_r, color_r = RIGHT_METRIC
@@ -167,18 +167,18 @@ def plot_grouped_bars(
         capthick=1.0,
         zorder=4,
     )
-    _annotate_bars(ax2, bars_r, y_r, dy=0.007, fontsize=10.5)
+    _annotate_bars(ax2, bars_r, y_r, dy=0.007, fontsize=15)
 
     labels = [MODEL_FULLNAME.get(m, m) for m in df["model"].astype(str).tolist()]
     ax.set_xticks(x)
-    ax.set_xticklabels(labels, fontsize=14, fontweight="bold")
-    ax.set_ylabel("Valve Metrics (Recall / F1)", fontsize=18, fontweight="bold")
-    ax2.set_ylabel("Cross-Parent Error Rate", fontsize=18, fontweight="bold")
+    ax.set_xticklabels(labels, fontsize=18, fontweight="bold")
+    ax.set_ylabel("Valve Metrics (Recall / F1)", fontsize=22, fontweight="bold")
+    ax2.set_ylabel("Cross-Parent Error Rate", fontsize=22, fontweight="bold")
     ax.set_ylim(float(left_ylim[0]), float(left_ylim[1]))
     ax2.set_ylim(float(right_ylim[0]), float(right_ylim[1]))
-    ax.tick_params(axis="y", labelsize=14, length=7, width=1.2)
-    ax2.tick_params(axis="y", labelsize=14, length=7, width=1.2)
-    ax.tick_params(axis="x", labelsize=13, length=0, pad=10)
+    ax.tick_params(axis="y", labelsize=18, length=7, width=1.2)
+    ax2.tick_params(axis="y", labelsize=18, length=7, width=1.2)
+    ax.tick_params(axis="x", labelsize=17, length=0, pad=10)
     ax.grid(axis="y", linestyle="--", linewidth=0.85, alpha=0.30, zorder=1)
     ax2.grid(False)
 
@@ -191,7 +191,7 @@ def plot_grouped_bars(
         bbox_to_anchor=(0.02, 0.98),
         ncol=1,
         frameon=False,
-        fontsize=13,
+        fontsize=17,
     )
 
     for spine in ax.spines.values():
