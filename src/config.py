@@ -48,6 +48,20 @@ FMAX_HZ        = min(2000.0, FS/2 - 1)        # 最高频（别超过Nyquist）
 USE_LOG1P      = True                         # 对|CWT|做 log1p
 EPS            = 1e-8
 
+# ========== Prototypical Network (DarkNet-19) ==========
+PROTO_DATA_ROOT = DATASET_STFT
+PROTO_N_WAY = 4
+PROTO_N_SUPPORT = 5
+PROTO_N_QUERY = 15
+PROTO_EPISODES = 3000
+PROTO_EVAL_EVERY = 50
+PROTO_VAL_EPISODES = 200
+PROTO_TEST_EPISODES = 500
 
 
 # OUT_DIR  = BASE_DIR / "pipe_dataset_simple" # 输出的本地数据集目录
+os.makedirs(DATASET, exist_ok=True)
+os.makedirs(DATASET_STFT, exist_ok=True)
+os.makedirs(CKPT_DIR, exist_ok=True)
+os.makedirs(LOG_DIR, exist_ok=True)
+os.makedirs(EXAMPLE_DIR, exist_ok=True)
