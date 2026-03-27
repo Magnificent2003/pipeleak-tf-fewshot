@@ -1,0 +1,26 @@
+dataset: custom
+
+encoder: resnet18
+classifier: logistic
+
+encoder_args:
+  bn_args:
+    episodic: []
+    n_episode: 4
+
+classifier_args:
+  n_way: 4
+
+optimizer: adam
+
+optimizer_args:
+  lr: 0.001
+
+train:
+  root: dataset
+  n_way: 4
+  n_shot: 2
+  n_query: 2
+  n_episode: 1
+
+epoch: 100
