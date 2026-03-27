@@ -11,6 +11,7 @@ DATASET_STFT = os.path.join(DATA_DIR, "dataset_stft")           # STFT 数据集
 DATASET_CWT  = os.path.join(DATA_DIR, "dataset_cwt")            # CWT 数据集目录
 CKPT_DIR   = os.path.join(__BASE__, "checkpoints")              # 默认模型权重保存目录
 LOG_DIR    = os.path.join(__BASE__, "logs")                     # 默认日志保存目录
+EXAMPLE_DIR = os.path.join(__BASE__, "example")                 # 示例图默认输出目录
 
 # ========== 数据集制作参数 ==========
 RATIOS         = (0.7, 0.2, 0.1)                                # train/val/test split ratios
