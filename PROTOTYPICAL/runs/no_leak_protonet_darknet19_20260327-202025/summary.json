@@ -1,0 +1,53 @@
+{
+  "timestamp": "20260327-202025",
+  "dataset_stft": "/home/magnificent/code/pipeline/data/dataset_stft",
+  "model": "protonet_darknet19",
+  "device": "cpu",
+  "seed": 2026,
+  "n_way": 4,
+  "n_support_train_val": 5,
+  "n_query_train_val": 5,
+  "n_support_test": 5,
+  "n_query_test": 5,
+  "train_episodes_requested": 2,
+  "episodes_ran": 2,
+  "eval_every": 1,
+  "val_episodes": 2,
+  "test_episodes": 2,
+  "best_episode": 1,
+  "best_val_acc": 0.25,
+  "test_loss_mean": 1.3862943649291992,
+  "test_acc_mean": 0.25,
+  "test_acc_std": 0.0,
+  "test_acc_se": 0.0,
+  "test_acc_ci95": 0.0,
+  "split_class_counts": {
+    "train": {
+      "3": 320,
+      "2": 168,
+      "0": 379,
+      "1": 77
+    },
+    "val": {
+      "3": 89,
+      "2": 50,
+      "0": 109,
+      "1": 21
+    },
+    "test": {
+      "3": 43,
+      "2": 28,
+      "0": 59,
+      "1": 7
+    }
+  },
+  "no_leakage_protocol": {
+    "train_source": "png_train + y4_train.npy only",
+    "model_selection_source": "png_val + y4_val.npy only",
+    "final_test_source": "png_test + y4_test.npy only"
+  },
+  "files": {
+    "train_trace_csv": "/home/magnificent/code/pipeline/PROTOTYPICAL/runs/no_leak_protonet_darknet19_20260327-202025/train_trace.csv",
+    "best_ckpt": ""
+  }
+}
