@@ -92,7 +92,7 @@ def main() -> None:
     ap.add_argument("--seed", type=int, default=cfg.SEED)
     ap.add_argument("--save_dir", type=str, default=cfg.CKPT_DIR)
     ap.add_argument("--log_dir", type=str, default=cfg.LOG_DIR)
-    ap.add_argument("--early_stop_eval_rounds", type=int, default=0)
+    ap.add_argument("--early_stop_eval_rounds", type=int, default=20)
     args = ap.parse_args()
 
     set_seed(int(args.seed))
