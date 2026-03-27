@@ -1,0 +1,23 @@
+dataset: custom
+
+encoder: darknet19
+classifier: logistic
+
+encoder_args: {}
+
+classifier_args:
+  n_way: 4
+
+optimizer: adam
+
+optimizer_args:
+  lr: 0.001
+
+train:
+  root: dataset
+  n_way: 4
+  n_shot: 5
+  n_query: 15
+  n_episode: 4
+
+epoch: 100
