@@ -4,6 +4,7 @@ data/
 
 .mplconfig/
 
+.codex
 *.pth
 *.pt
 *.joblib

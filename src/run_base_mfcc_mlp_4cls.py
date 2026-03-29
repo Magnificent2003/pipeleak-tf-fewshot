@@ -154,6 +154,7 @@ def main():
     ap.add_argument("--save_dir", type=str, default=cfg.CKPT_DIR)
     ap.add_argument("--log_dir", type=str, default=cfg.LOG_DIR)
     ap.add_argument("--seed", type=int, default=cfg.SEED)
+    ap.add_argument("--loss_type", type=str, default="ce", choices=["ce", "weighted_ce"])
     args = ap.parse_args()
 
     random.seed(args.seed)
@@ -206,11 +207,17 @@ def main():
 
     model = MLP4(in_dim=Ftr.shape[1], hidden=args.hidden, p_drop=args.dropout, num_classes=num_classes).to(device)
 
-    # 类不均衡：温和权重（开平方反频率）
-    counts = np.bincount(ytr, minlength=num_classes).astype(np.float32)
-    counts[counts == 0] = counts[counts > 0].min() if (counts > 0).any() else 1.0
-    class_w = (counts.max() / counts) ** 0.5
-    criterion = nn.CrossEntropyLoss(weight=torch.tensor(class_w, dtype=torch.float32, device=device))
+    if args.loss_type == "ce":
+        criterion = nn.CrossEntropyLoss()
+    elif args.loss_type == "weighted_ce":
+        # 类不均衡：温和权重（开平方反频率）
+        counts = np.bincount(ytr, minlength=num_classes).astype(np.float32)
+        counts[counts == 0] = counts[counts > 0].min() if (counts > 0).any() else 1.0
+        class_w = (counts.max() / counts) ** 0.5
+        criterion = nn.CrossEntropyLoss(weight=torch.tensor(class_w, dtype=torch.float32, device=device))
+    else:
+        raise ValueError(f"Unsupported loss_type={args.loss_type}")
+
     optim = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     sched = torch.optim.lr_scheduler.StepLR(optim, step_size=20, gamma=0.5)
 
